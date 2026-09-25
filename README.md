@@ -1,21 +1,29 @@
-# Team Rank Poll
+# Простое голосование (Borda)
 
-Ранжирование 2 команд (Borda). Голоса в **общей облачной базе** (все устройства).
+Сайт: **https://poll69.vercel.app/**
 
-## Ссылки
+Админ: **https://poll69.vercel.app/#/admin?key=rank2026admin**
 
-- **Продакшен:** https://poll69.vercel.app/
-- **Админ:** https://poll69.vercel.app/#/admin?key=rank2026admin
+## Как устроена база
 
-## Возможности
+Один JSON-файл: `data/votes.json` в этом репозитории.
 
-- Drag-and-drop ранжирование (и touch на телефоне)
-- Общая база голосов (не только localStorage)
-- Админ: результаты Borda + кнопка **«Скинуть голосование»**
-- Экспорт / импорт JSON
+- `GET /api/votes` — прочитать голоса  
+- `POST /api/vote` — записать голос  
+- `POST /api/reset` — скинуть (админ)
 
-## Локально
+## Один шаг, чтобы запись заработала
 
-```bash
-python3 -m http.server 8080
-```
+Сейчас чтение уже есть, **запись** нужна 1 переменная на Vercel:
+
+1. Создай GitHub token: https://github.com/settings/tokens  
+   Classic → scope **`repo`** → Generate
+2. Vercel → проект **poll69** → **Settings → Environment Variables**  
+   - Name: `POLL_GITHUB_TOKEN`  
+   - Value: *токен*  
+   - Production ✅
+3. **Deployments** → ⋮ на последнем → **Redeploy**  
+   (если деплой был Canceled — сделай Redeploy)
+
+Проверка: открой https://poll69.vercel.app/api/votes  
+Должен быть JSON `{"votes":[],...}`, не ошибка про token.
