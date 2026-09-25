@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+<header class="hero">
+  <h1>{{ title }}</h1>
+  <p class="subtitle">{{ subtitle }}</p>
+</header>
+
+<section class="teams">
+  {% for tid, team in teams.items() %}
+  <a class="team-card {% if voted[tid] %}done{% endif %}"
+     href="{% if voted[tid] %}#{% else %}{{ url_for('vote_page', team_id=tid) }}{% endif %}">
+    <div class="team-badge">{{ loop.index }}</div>
+    <div class="team-info">
+      <h2>{{ team.name }}</h2>
+      <p>{{ team.members|length }} участников</p>
+    </div>
+    <div class="team-action">
+      {% if voted[tid] %}
+        <span class="pill success">✓ Голос учтён</span>
+      {% else %}
+        <span class="pill">Ранжировать →</span>
+      {% endif %}
+    </div>
+  </a>
+  {% endfor %}
+</section>
+
+<footer class="foot">
+  <p>Один голос на команду с этого устройства. Расставьте всех от <strong>самого значимого</strong> (верх) к менее значимому (низ).</p>
+</footer>
+{% endblock %}

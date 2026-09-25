@@ -1,34 +1,40 @@
-# Hello World
+# Team Rank Poll — MVP
 
-Fast & simple Hello World application.
+Простой опрос ранжирования для **2 команд** (~15 человек).
 
-A clean, modern single-file web app with dark theme, gradient text, and interactive button.
+## Что делает
+- Участники голосуют **отдельно за каждую команду**
+- Расставляют **всех** людей от самого значимого (1 место) к менее значимому
+- Один голос на команду с одного браузера (сессия)
+- Подсчёт **Borda**: 1 место = N очков, 2 место = N−1, …, последнее = 1
+- Админ видит сводный рейтинг по секретной ссылке
 
-## ✨ Features
-
-- Beautiful dark glassmorphism UI
-- Gradient "Hello World" title
-- Interactive "Say Hello" button with click counter
-- Fully responsive
-- Zero dependencies — pure HTML + CSS + JS
-
-## 🚀 Quick Start
-
-Just open `index.html` in any browser.
-
-Or serve locally:
+## Запуск
 
 ```bash
-python3 -m http.server 8000
-# → http://localhost:8000
+pip install -r requirements.txt
+python3 app.py
 ```
 
+- Голосование: http://localhost:8080/
+- **Админ-результаты:** http://localhost:8080/admin?key=rank2026admin
+
+## Настройка состава команд
+
+Откройте `config.py` и замените имена в `TEAMS`, при необходимости смените `ADMIN_SECRET`.
+
+## Файлы
+| Файл | Назначение |
+|------|------------|
+| `config.py` | Команды, имена, секрет админа |
+| `app.py` | Сервер Flask |
+| `data/votes.json` | Хранилище голосов (создаётся автоматически) |
+| `templates/` | Страницы |
+| `static/` | Стили и drag-and-drop |
+
+## Сброс голосов
+В админке есть кнопка «Сбросить все голоса».
+
 ## Deploy
-
-Works instantly on:
-- Vercel
-- Netlify
-- GitHub Pages
-- Cloudflare Pages
-
-No build step required.
+Любой Python-хостинг с Flask (Railway, Render, Fly.io, VPS).
+Укажите `PORT` через переменную окружения.
