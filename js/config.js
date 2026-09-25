@@ -4,7 +4,7 @@ window.POLL_CONFIG = {
   SUBTITLE: "Расставьте участников от самого значимого (верх) к менее значимому (низ). Один голос на команду с устройства.",
   TEAMS: {
     team1: {
-      name: "Team A",
+      name: "Team: Accounting Software",
       members: [
         "Aistė","Irma","Daiva","Inga","Jurgita",
         "Karolis","Sasha","Rajith","Anatolij","Nadil",
@@ -12,7 +12,7 @@ window.POLL_CONFIG = {
       ],
     },
     team2: {
-      name: "Team B",
+      name: "Team: Website Builder",
       members: [
         "Vasilisa","Anna","Milana","Tatjana","Viacheslav",
         "Marius","German","Mike","Dmitrij","Aleksandr",
