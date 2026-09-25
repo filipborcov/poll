@@ -410,53 +410,33 @@ window.POLL_CONFIG = {
   ADMIN_SECRET: "rank2026admin",
   TITLE: "Рейтинг значимости участников",
   SUBTITLE: "Расставьте всех участников команды от самого значимого к менее значимому. Один голос на команду.",
-  API_BASE: "",
-  VOTES_URL: "https://crudcrud.com/api/c7458f43fa864775b1b4232a82673e61/votes",
+  // Votes file in GitHub (public read). Writes go through same-origin /api/* on Vercel.
+  GH_OWNER: "filipborcov",
+  GH_REPO: "poll",
+  GH_PATH: "data/votes.json",
+  GH_RAW: "https://raw.githubusercontent.com/filipborcov/poll/main/data/votes.json",
+  API_BASE: "", // same origin
   TEAMS: {
     team1: {
       name: "Команда А",
       members: [
-        "Алексей Иванов",
-        "Мария Петрова",
-        "Дмитрий Сидоров",
-        "Анна Козлова",
-        "Сергей Новиков",
-        "Елена Морозова",
-        "Игорь Волков",
-        "Ольга Соколова",
-        "Павел Лебедев",
-        "Наталья Кузнецова",
-        "Андрей Попов",
-        "Юлия Васильева",
-        "Максим Михайлов",
-        "Екатерина Фёдорова",
-        "Артём Смирнов",
+        "Алексей Иванов","Мария Петрова","Дмитрий Сидоров","Анна Козлова","Сергей Новиков",
+        "Елена Морозова","Игорь Волков","Ольга Соколова","Павел Лебедев","Наталья Кузнецова",
+        "Андрей Попов","Юлия Васильева","Максим Михайлов","Екатерина Фёдорова","Артём Смирнов"
       ],
     },
     team2: {
       name: "Команда Б",
       members: [
-        "Владимир Орлов",
-        "Татьяна Николаева",
-        "Роман Алексеев",
-        "Ирина Павлова",
-        "Кирилл Семёнов",
-        "Светлана Егорова",
-        "Денис Степанов",
-        "Виктория Зайцева",
-        "Никита Григорьев",
-        "Алина Романова",
-        "Глеб Борисов",
-        "Дарья Ковалёва",
-        "Тимур Медведев",
-        "Полина Ершова",
-        "Станислав Тимофеев",
+        "Владимир Орлов","Татьяна Николаева","Роман Алексеев","Ирина Павлова","Кирилл Семёнов",
+        "Светлана Егорова","Денис Степанов","Виктория Зайцева","Никита Григорьев","Алина Романова",
+        "Глеб Борисов","Дарья Ковалёва","Тимур Медведев","Полина Ершова","Станислав Тимофеев"
       ],
     },
   },
 };
 (function () {
-  const LOCAL_KEY = "team-rank-poll-v4";
+  const LOCAL_KEY = "team-rank-poll-v7";
   const DEVICE_KEY = "team-rank-poll-device";
 
   function getDeviceId() {
@@ -470,208 +450,103 @@ window.POLL_CONFIG = {
 
   function cfg() { return window.POLL_CONFIG || {}; }
 
-  function votesUrl() { return cfg().VOTES_URL || ""; }
-
   function cacheGet() {
     try {
       const raw = localStorage.getItem(LOCAL_KEY);
       if (raw) return JSON.parse(raw);
     } catch (_) {}
-    return { votes: [] };
+    return { votes: [], devices: {}, meta: {} };
+  }
+  function cacheSet(data) {
+    try { localStorage.setItem(LOCAL_KEY, JSON.stringify(data)); } catch (_) {}
   }
 
-  function cacheSet(votes) {
-    try { localStorage.setItem(LOCAL_KEY, JSON.stringify({ votes: votes })); } catch (_) {}
+  function api(path) {
+    const base = (cfg().API_BASE || "").replace(/\/$/, "");
+    return base + path;
   }
 
-  /** ranking names -> "0,3,1,2,..." compact string (cloud rejects large arrays) */
-  function encodeRanking(teamId, ranking) {
-    const members = (cfg().TEAMS[teamId] || {}).members || [];
-    const idx = ranking.map((name) => {
-      const i = members.indexOf(name);
-      if (i < 0) throw new Error("Неизвестный участник: " + name);
-      return i;
-    });
-    return idx.join(",");
+  async function loadFromRaw() {
+    const url = (cfg().GH_RAW || "") + (cfg().GH_RAW && cfg().GH_RAW.indexOf("?") >= 0 ? "&" : "?") + "_=" + Date.now();
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) throw new Error("Не удалось загрузить результаты (" + res.status + ")");
+    const data = await res.json();
+    if (!Array.isArray(data.votes)) data.votes = [];
+    if (!data.devices) data.devices = {};
+    if (!data.meta) data.meta = {};
+    cacheSet(data);
+    return data;
   }
 
-  function decodeRanking(teamId, r) {
-    const members = (cfg().TEAMS[teamId] || {}).members || [];
-    if (Array.isArray(r)) {
-      // legacy: full names or indices
-      if (typeof r[0] === "number") return r.map((i) => members[i]).filter(Boolean);
-      return r;
-    }
-    if (typeof r === "string") {
-      return r.split(",").map((s) => members[parseInt(s, 10)]).filter(Boolean);
-    }
-    return [];
-  }
-
-  function normalizeVote(raw) {
-    // compact cloud format: {t,r,ts,d,n,_id} or full {team_id,ranking,...}
-    const team_id = raw.team_id || raw.t;
-    const device = raw.device || raw.d || "";
-    const name = raw.name || raw.n || "";
-    const ts = raw.ts || 0;
-    const ranking = decodeRanking(team_id, raw.ranking != null ? raw.ranking : raw.r);
-    return { team_id, ranking, ts, device, name, _id: raw._id };
-  }
-
-  async function cloudList() {
-    const url = votesUrl();
-    if (!url) throw new Error("VOTES_URL missing");
-    const res = await fetch(url + "?_=" + Date.now(), { cache: "no-store" });
-    if (!res.ok) throw new Error("Не удалось загрузить голоса (" + res.status + ")");
-    const arr = await res.json();
-    if (!Array.isArray(arr)) return [];
-    return arr.map(normalizeVote).filter((v) => v.team_id && v.ranking && v.ranking.length);
-  }
-
-  async function cloudPost(teamId, ranking, device, voterName) {
-    const url = votesUrl();
-    if (!url) throw new Error("VOTES_URL missing");
-    // COMPACT body only — large JSON arrays get HTTP 500 on free cloud
-    const body = {
-      t: teamId,
-      r: encodeRanking(teamId, ranking),
-      ts: Date.now(),
-      d: device,
-      n: String(voterName || "").slice(0, 60),
-    };
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      const t = await res.text().catch(() => "");
-      throw new Error("Сохранение не удалось (" + res.status + ") " + t.slice(0, 60));
-    }
-    return res.json();
-  }
-
-  async function cloudReset() {
-    const url = votesUrl();
-    const list = await cloudList();
-    // re-fetch raw for ids
-    const res = await fetch(url + "?_=" + Date.now(), { cache: "no-store" });
-    const arr = await res.json();
-    if (!Array.isArray(arr)) return;
-    for (const v of arr) {
-      if (v._id) {
-        await fetch(url + "/" + v._id, { method: "DELETE" }).catch(() => {});
-      }
-    }
-  }
-
-  // optional same-origin API
-  async function apiGet() {
-    try {
-      const res = await fetch("/api/votes", { cache: "no-store" });
-      if (res.status === 503 || res.status === 404) return null;
-      if (!res.ok) return null;
-      const data = await res.json();
-      return Array.isArray(data.votes) ? data.votes.map(normalizeVote) : [];
-    } catch (_) {
-      return null;
-    }
-  }
-
-  async function apiPost(vote) {
-    try {
-      const res = await fetch("/api/vote", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(vote),
-      });
-      if (res.status === 503 || res.status === 404) return null;
-      const data = await res.json().catch(() => ({}));
-      if (res.status === 409) {
-        const err = new Error(data.message || "Уже голосовали");
-        err.code = "ALREADY";
-        throw err;
-      }
-      if (!res.ok) return null;
-      return data;
-    } catch (e) {
-      if (e.code === "ALREADY") throw e;
-      return null;
-    }
-  }
-
-  async function apiReset(key) {
-    try {
-      const res = await fetch("/api/reset", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-Admin-Key": key },
-        body: JSON.stringify({ key }),
-      });
-      if (res.status === 503 || res.status === 404) return null;
-      return res.ok;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  let mode = "unknown";
-
-  async function loadVotes() {
-    const apiVotes = await apiGet();
-    if (apiVotes) {
-      mode = "api";
-      cacheSet(apiVotes);
-      return apiVotes;
-    }
-    const cloud = await cloudList();
-    mode = "cloud";
-    cacheSet(cloud);
-    return cloud;
+  async function loadFromApi() {
+    const res = await fetch(api("/api/votes") + "?_=" + Date.now(), { cache: "no-store" });
+    if (res.status === 404 || res.status === 503) return null;
+    if (!res.ok) throw new Error("API " + res.status);
+    const data = await res.json();
+    if (!Array.isArray(data.votes)) data.votes = [];
+    cacheSet(data);
+    return data;
   }
 
   async function load() {
-    return { votes: await loadVotes(), devices: {}, meta: {} };
+    try {
+      const apiData = await loadFromApi();
+      if (apiData) return apiData;
+    } catch (e) {
+      console.warn("api load", e);
+    }
+    return loadFromRaw();
+  }
+
+  async function loadVotes() {
+    return (await load()).votes || [];
   }
 
   async function hasVoted(teamId) {
     const device = getDeviceId();
-    const votes = await loadVotes();
-    return votes.some((v) => v.device === device && v.team_id === teamId);
+    const data = await load();
+    const key = device + ":" + teamId;
+    if (data.devices && data.devices[key]) return true;
+    return (data.votes || []).some((v) => v.device === device && v.team_id === teamId);
   }
 
   async function addVote(teamId, ranking, voterName) {
     const device = getDeviceId();
-    const votes = await loadVotes();
-    if (votes.some((v) => v.device === device && v.team_id === teamId)) {
+    // local already-voted check
+    const cur = await load();
+    if ((cur.votes || []).some((v) => v.device === device && v.team_id === teamId)) {
       const err = new Error("Вы уже голосовали за эту команду с этого устройства.");
       err.code = "ALREADY";
       throw err;
     }
-
-    // try API with full ranking
-    const full = {
-      team_id: teamId,
-      ranking,
-      ts: Date.now(),
-      device,
-      name: voterName || "",
-    };
-    try {
-      const r = await apiPost(full);
-      if (r) {
-        mode = "api";
-        cacheSet(await loadVotes());
-        return;
-      }
-    } catch (e) {
-      if (e.code === "ALREADY") throw e;
+    const res = await fetch(api("/api/vote"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        team_id: teamId,
+        ranking: ranking,
+        device: device,
+        name: String(voterName || "").slice(0, 80),
+      }),
+    });
+    let data = {};
+    try { data = await res.json(); } catch (_) {}
+    if (res.status === 409) {
+      const err = new Error(data.message || "Уже голосовали");
+      err.code = "ALREADY";
+      throw err;
     }
-
-    // cloud compact
-    await cloudPost(teamId, ranking, device, voterName);
-    mode = "cloud";
-    const all = await loadVotes();
-    cacheSet(all);
+    if (res.status === 503) {
+      throw new Error(
+        "Сервер ещё не настроен для записи голосов. Админу: в Vercel → Environment Variables добавьте POLL_GITHUB_TOKEN (GitHub PAT с правом contents:write)."
+      );
+    }
+    if (!res.ok) {
+      throw new Error(data.error || data.message || "Ошибка сохранения (" + res.status + ")");
+    }
+    // refresh cache from source of truth
+    try { await load(); } catch (_) {}
+    return data;
   }
 
   async function bordaScores(teamId) {
@@ -701,9 +576,18 @@ window.POLL_CONFIG = {
 
   async function resetAll() {
     const key = cfg().ADMIN_SECRET;
-    const ok = await apiReset(key);
-    if (!ok) await cloudReset();
-    cacheSet([]);
+    const res = await fetch(api("/api/reset"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Admin-Key": key },
+      body: JSON.stringify({ key: key }),
+    });
+    let data = {};
+    try { data = await res.json(); } catch (_) {}
+    if (res.status === 503) {
+      throw new Error("Нужен POLL_GITHUB_TOKEN в Vercel Environment Variables");
+    }
+    if (!res.ok) throw new Error(data.error || "Сброс не удался (" + res.status + ")");
+    cacheSet({ votes: [], devices: {}, meta: { reset_at: Date.now() } });
   }
 
   async function totalBallots() {
@@ -711,24 +595,26 @@ window.POLL_CONFIG = {
   }
 
   function exportJSON() {
-    return JSON.stringify({ votes: cacheGet().votes || [] }, null, 2);
+    return JSON.stringify(cacheGet(), null, 2);
   }
 
   async function importJSON(raw) {
-    const data = JSON.parse(raw);
-    if (!data || !Array.isArray(data.votes)) throw new Error("Неверный формат");
+    const incoming = JSON.parse(raw);
+    if (!incoming || !Array.isArray(incoming.votes)) throw new Error("Неверный формат");
     let added = 0;
-    const existing = await loadVotes();
-    const seen = new Set(existing.map((v) => v.team_id + "|" + v.ts + "|" + v.device));
-    for (const v of data.votes) {
-      const k = (v.team_id || v.t) + "|" + (v.ts || 0) + "|" + (v.device || v.d || "");
-      if (seen.has(k)) continue;
-      const teamId = v.team_id || v.t;
-      const ranking = decodeRanking(teamId, v.ranking != null ? v.ranking : v.r);
-      if (!teamId || !ranking.length) continue;
+    for (const v of incoming.votes) {
       try {
-        await cloudPost(teamId, ranking, v.device || v.d || "import", v.name || v.n || "");
-        added++;
+        const res = await fetch(api("/api/vote"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            team_id: v.team_id,
+            ranking: v.ranking,
+            device: (v.device || "import") + "_" + (v.ts || Date.now()),
+            name: v.name || "",
+          }),
+        });
+        if (res.ok) added++;
       } catch (_) {}
     }
     return added;
@@ -736,31 +622,24 @@ window.POLL_CONFIG = {
 
   async function ping() {
     try {
-      const apiVotes = await apiGet();
-      if (apiVotes) return { ok: true, mode: "api", count: apiVotes.length };
-    } catch (_) {}
-    try {
-      const votes = await cloudList();
-      return { ok: true, mode: "cloud", count: votes.length };
+      const data = await load();
+      const count = (data.votes || []).length;
+      // check if write API is configured
+      let writeOk = false;
+      try {
+        const r = await fetch(api("/api/votes"), { cache: "no-store" });
+        writeOk = r.ok;
+      } catch (_) {}
+      return { ok: true, mode: writeOk ? "github+api" : "github-read", count: count };
     } catch (e) {
-      return { ok: false, mode: "local", error: String(e.message || e) };
+      return { ok: false, mode: "none", error: String(e.message || e) };
     }
   }
 
   window.PollStore = {
-    load,
-    loadVotes,
-    hasVoted,
-    addVote,
-    bordaScores,
-    resetAll,
-    exportJSON,
-    importJSON,
-    totalBallots,
-    getDeviceId,
-    ping,
-    getMode: () => mode,
-    cacheGet,
+    load, loadVotes, hasVoted, addVote, bordaScores, resetAll,
+    exportJSON, importJSON, totalBallots, getDeviceId, ping,
+    getMode: () => "github", cacheGet,
   };
 })();
 (function () {
