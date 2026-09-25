@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Рейтинг значимости участников</title>
+  <meta name="description" content="Team Rank Poll">
   <style>
 :root {
   --bg: #0b1020;
@@ -407,7 +408,6 @@ window.POLL_CONFIG = {
     },
   },
 };
-
 (function () {
   const KEY = "team-rank-poll-v1";
 
@@ -528,7 +528,6 @@ window.POLL_CONFIG = {
     totalBallots,
   };
 })();
-
 (function () {
   function initSortable(list) {
     if (!list) return;
@@ -546,7 +545,7 @@ window.POLL_CONFIG = {
         dragEl = item;
         item.classList.add("dragging");
         e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData("text/plain", item.getAttribute("data-name"));
+        e.dataTransfer.setData("text/plain", decodeURIComponent(item.getAttribute("data-name") || ""));
       });
       item.addEventListener("dragend", () => {
         item.classList.remove("dragging");
@@ -609,11 +608,10 @@ window.POLL_CONFIG = {
   window.initSortable = initSortable;
   window.getRanking = function (list) {
     return Array.from(list.querySelectorAll(".rank-item")).map(
-      (li) => li.getAttribute("data-name")
+      (li) => decodeURIComponent(li.getAttribute("data-name") || "")
     );
   };
 })();
-
 (function () {
   const cfg = window.POLL_CONFIG;
   const root = document.getElementById("app");
@@ -682,7 +680,7 @@ window.POLL_CONFIG = {
     const items = team.members
       .map(
         (m, i) => `
-      <li class="rank-item" data-name="${m.replace(/"/g, """)}" draggable="true">
+      <li class="rank-item" data-name="${encodeURIComponent(m)}" draggable="true">
         <span class="handle" title="Перетащить">⠿</span>
         <span class="place">${i + 1}</span>
         <span class="name">${m}</span>

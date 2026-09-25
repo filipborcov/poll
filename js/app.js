@@ -66,7 +66,7 @@
     const items = team.members
       .map(
         (m, i) => `
-      <li class="rank-item" data-name="${m.replace(/"/g, """)}" draggable="true">
+      <li class="rank-item" data-name="${encodeURIComponent(m)}" draggable="true">
         <span class="handle" title="Перетащить">⠿</span>
         <span class="place">${i + 1}</span>
         <span class="name">${m}</span>

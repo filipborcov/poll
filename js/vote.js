@@ -15,7 +15,7 @@
         dragEl = item;
         item.classList.add("dragging");
         e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData("text/plain", item.getAttribute("data-name"));
+        e.dataTransfer.setData("text/plain", decodeURIComponent(item.getAttribute("data-name") || ""));
       });
       item.addEventListener("dragend", () => {
         item.classList.remove("dragging");
@@ -78,7 +78,7 @@
   window.initSortable = initSortable;
   window.getRanking = function (list) {
     return Array.from(list.querySelectorAll(".rank-item")).map(
-      (li) => li.getAttribute("data-name")
+      (li) => decodeURIComponent(li.getAttribute("data-name") || "")
     );
   };
 })();
