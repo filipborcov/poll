@@ -1,34 +1,33 @@
 # Team Rank Poll
 
-Опрос ранжирования для 2 команд (~15 человек). Подсчёт **Borda**.
+Опрос ранжирования 2 команд (~15 человек). Borda count.
 
-## Онлайн
+## 🚀 Рабочие ссылки (без логина)
 
-Откройте сайт Vercel — голосование сразу работает в браузере.
+| Ссылка | Примечание |
+|--------|------------|
+| **https://raw.githack.com/filipborcov/poll/main/index.html** | основной |
+| https://raw.githack.com/filipborcov/poll/main/poll.html | single-file |
 
-- Голосование: `/`
-- Админ-результаты: `/#/admin?key=rank2026admin`
+Админ: откройте опрос → внизу «Результаты (админ)»  
+или добавьте `#/admin?key=rank2026admin` к URL.
 
-## Как работает
+## Vercel
 
-- Drag-and-drop ранжирование всех участников
-- Один голос на команду с устройства (localStorage)
-- Borda: 1 место = N очков, последнее = 1
-- Экспорт/импорт JSON для объединения голосов с разных устройств
+Проект `poll` на Vercel **закрыт SSO** (Deployment Protection).  
+Пока не отключите защиту, внешние пользователи видят только логин Vercel:
 
-## Настройка команд
+1. https://vercel.com/sitepro-filip/poll → **Settings → Deployment Protection**
+2. Выключите **Vercel Authentication**
+3. Save → Production URL заработает
 
-Отредактируйте `js/config.js` (имена, `ADMIN_SECRET`).
+## Настройка
+
+Имена команд / секрет: в `index.html` (блок `POLL_CONFIG`) или `js/config.js`.
 
 ## Локально
 
 ```bash
-# любой статический сервер
 python3 -m http.server 8080
 # → http://localhost:8080
 ```
-
-## Deploy (Vercel)
-
-Репозиторий подключён к Vercel — push в `main` деплоит автоматически.
-Статический сайт, build не нужен.
