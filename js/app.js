@@ -55,7 +55,7 @@
 
     const ping = await PollStore.ping();
     const statusHtml = ping.ok
-      ? `<span class="pill success">☁ Общая база подключена</span>`
+      ? `<span class="pill success">☁ Общая база подключена (${ping.mode}, голосов: ${ping.count || 0})</span>`
       : `<span class="pill danger">⚠ База недоступна — голоса могут не синхронизироваться</span>`;
 
     const entries = Object.entries(cfg.TEAMS);
@@ -231,7 +231,7 @@
         <p class="subtitle">Всего бюллетеней: <strong>${total}</strong> · Borda: 1 место = N очков, последнее = 1</p>
         <p class="subtitle">${
           ping.ok
-            ? "☁ Голоса в общей облачной базе (все устройства)"
+            ? "☁ Общая база (" + ping.mode + "), бюллетеней в базе: " + (ping.count || 0)
             : "⚠ Облако недоступно: " + (ping.error || "")
         }</p>
       </header>
