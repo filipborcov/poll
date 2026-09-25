@@ -1,4 +1,4 @@
-const { cors, deleteAll } = require("./_db");
+const { cors, writeStore, empty } = require("./_db");
 
 module.exports = async function handler(req, res) {
   cors(res);
@@ -10,7 +10,9 @@ module.exports = async function handler(req, res) {
     if (body.key !== admin && req.headers["x-admin-key"] !== admin) {
       return res.status(403).json({ error: "forbidden" });
     }
-    await deleteAll();
+    const data = empty();
+    data.meta.reset_at = Date.now();
+    await writeStore(data);
     return res.status(200).json({ ok: true });
   } catch (e) {
     return res.status(502).json({ error: String(e.message || e) });
