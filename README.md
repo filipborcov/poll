@@ -1,33 +1,21 @@
 # Team Rank Poll
 
-Опрос ранжирования 2 команд (~15 человек). Borda count.
+Ранжирование 2 команд (Borda). Голоса в **общей облачной базе** (все устройства).
 
-## 🚀 Рабочие ссылки (без логина)
+## Ссылки
 
-| Ссылка | Примечание |
-|--------|------------|
-| **https://raw.githack.com/filipborcov/poll/main/index.html** | основной |
-| https://raw.githack.com/filipborcov/poll/main/poll.html | single-file |
+- **Продакшен:** https://poll69.vercel.app/
+- **Админ:** https://poll69.vercel.app/#/admin?key=rank2026admin
 
-Админ: откройте опрос → внизу «Результаты (админ)»  
-или добавьте `#/admin?key=rank2026admin` к URL.
+## Возможности
 
-## Vercel
-
-Проект `poll` на Vercel **закрыт SSO** (Deployment Protection).  
-Пока не отключите защиту, внешние пользователи видят только логин Vercel:
-
-1. https://vercel.com/sitepro-filip/poll → **Settings → Deployment Protection**
-2. Выключите **Vercel Authentication**
-3. Save → Production URL заработает
-
-## Настройка
-
-Имена команд / секрет: в `index.html` (блок `POLL_CONFIG`) или `js/config.js`.
+- Drag-and-drop ранжирование (и touch на телефоне)
+- Общая база голосов (не только localStorage)
+- Админ: результаты Borda + кнопка **«Скинуть голосование»**
+- Экспорт / импорт JSON
 
 ## Локально
 
 ```bash
 python3 -m http.server 8080
-# → http://localhost:8080
 ```

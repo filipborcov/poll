@@ -340,3 +340,56 @@ body {
   font-size: .85rem;
   margin-bottom: 1.25rem;
 }
+
+/* voter name + reset box */
+.voter-box {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin: 0 0 14px;
+}
+.voter-box label {
+  display: block;
+  font-size: 0.9rem;
+  margin-bottom: 8px;
+  color: var(--muted);
+}
+.voter-box input {
+  width: 100%;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 1rem;
+}
+.voter-box input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(99,102,241,.25);
+}
+.muted { color: var(--muted); font-weight: 400; }
+
+.reset-box {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(239,68,68,.08);
+  border: 1px solid rgba(239,68,68,.35);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  margin-bottom: 18px;
+}
+.reset-box .muted { margin-top: 4px; font-size: 0.9rem; }
+.btn.big { padding: 14px 22px; font-size: 1.05rem; font-weight: 700; }
+.pill.danger {
+  background: rgba(239,68,68,.15);
+  color: #f87171;
+  border: 1px solid rgba(239,68,68,.3);
+}
+
+@media (max-width: 640px) {
+  .reset-box { flex-direction: column; align-items: stretch; }
+}

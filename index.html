@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Рейтинг значимости участников</title>
-  <meta name="description" content="Team Rank Poll">
+  <meta name="description" content="Team Rank Poll — общая база голосов">
   <style>
 :root {
   --bg: #0b1020;
@@ -349,6 +349,59 @@ body {
   margin-bottom: 1.25rem;
 }
 
+/* voter name + reset box */
+.voter-box {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin: 0 0 14px;
+}
+.voter-box label {
+  display: block;
+  font-size: 0.9rem;
+  margin-bottom: 8px;
+  color: var(--muted);
+}
+.voter-box input {
+  width: 100%;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 1rem;
+}
+.voter-box input:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(99,102,241,.25);
+}
+.muted { color: var(--muted); font-weight: 400; }
+
+.reset-box {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  background: rgba(239,68,68,.08);
+  border: 1px solid rgba(239,68,68,.35);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  margin-bottom: 18px;
+}
+.reset-box .muted { margin-top: 4px; font-size: 0.9rem; }
+.btn.big { padding: 14px 22px; font-size: 1.05rem; font-weight: 700; }
+.pill.danger {
+  background: rgba(239,68,68,.15);
+  color: #f87171;
+  border: 1px solid rgba(239,68,68,.3);
+}
+
+@media (max-width: 640px) {
+  .reset-box { flex-direction: column; align-items: stretch; }
+}
+
   </style>
 </head>
 <body>
@@ -359,12 +412,17 @@ body {
   </div>
   <script>
 // ============================================================
-//  НАСТРОЙКИ ОПРОСА — редактируйте здесь
+//  НАСТРОЙКИ ОПРОСА
 // ============================================================
 window.POLL_CONFIG = {
   ADMIN_SECRET: "rank2026admin",
   TITLE: "Рейтинг значимости участников",
   SUBTITLE: "Расставьте всех участников команды от самого значимого к менее значимому. Один голос на команду.",
+
+  // Общая «база» голосов (все устройства видят одни и те же результаты).
+  // Backend: crudcrud.com (бесплатно). Если вдруг протухнет — админ увидит подсказку.
+  STORE_URL: "https://crudcrud.com/api/34a6c4578dc046bd9205baaaa0f04e9a/poll/6ab62e485dd35903e8c6c568",
+
   TEAMS: {
     team1: {
       name: "Команда А",
@@ -409,54 +467,151 @@ window.POLL_CONFIG = {
   },
 };
 (function () {
-  const KEY = "team-rank-poll-v1";
-
-  function load() {
-    try {
-      const raw = localStorage.getItem(KEY);
-      if (raw) return JSON.parse(raw);
-    } catch (_) {}
-    return { votes: [], meta: { created: Date.now() }, votedTeams: [] };
-  }
-
-  function save(data) {
-    localStorage.setItem(KEY, JSON.stringify(data));
-  }
-
-  function hasVoted(teamId) {
-    const d = load();
-    return (d.votedTeams || []).includes(teamId);
-  }
-
-  function markVoted(teamId) {
-    const d = load();
-    d.votedTeams = d.votedTeams || [];
-    if (!d.votedTeams.includes(teamId)) d.votedTeams.push(teamId);
-    save(d);
-  }
-
-  function addVote(teamId, ranking) {
-    const d = load();
-    d.votes.push({
-      team_id: teamId,
-      ranking: ranking,
-      ts: Date.now(),
-      device: getDeviceId(),
-    });
-    save(d);
-    markVoted(teamId);
-  }
+  const LOCAL_KEY = "team-rank-poll-v2";
+  const DEVICE_KEY = "team-rank-poll-device";
 
   function getDeviceId() {
-    let id = localStorage.getItem("team-rank-poll-device");
+    let id = localStorage.getItem(DEVICE_KEY);
     if (!id) {
       id = "d_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
-      localStorage.setItem("team-rank-poll-device", id);
+      localStorage.setItem(DEVICE_KEY, id);
     }
     return id;
   }
 
-  function bordaScores(teamId) {
+  function emptyData() {
+    return { votes: [], devices: {}, meta: { created: Date.now() } };
+  }
+
+  function cacheGet() {
+    try {
+      const raw = localStorage.getItem(LOCAL_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch (_) {}
+    return emptyData();
+  }
+
+  function cacheSet(data) {
+    try {
+      localStorage.setItem(LOCAL_KEY, JSON.stringify(data));
+    } catch (_) {}
+  }
+
+  function storeUrl() {
+    return (window.POLL_CONFIG && window.POLL_CONFIG.STORE_URL) || "";
+  }
+
+  async function remoteGet() {
+    const url = storeUrl();
+    if (!url) return null;
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) throw new Error("Не удалось загрузить базу голосов (" + res.status + ")");
+    const data = await res.json();
+    // crudcrud wraps with _id
+    return {
+      votes: Array.isArray(data.votes) ? data.votes : [],
+      devices: data.devices && typeof data.devices === "object" ? data.devices : {},
+      meta: data.meta || {},
+      _id: data._id,
+    };
+  }
+
+  async function remotePut(data) {
+    const url = storeUrl();
+    if (!url) throw new Error("STORE_URL не задан");
+    const body = {
+      votes: data.votes || [],
+      devices: data.devices || {},
+      meta: Object.assign({}, data.meta || {}, { updated: Date.now() }),
+    };
+    const res = await fetch(url, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw new Error("Не удалось сохранить в базу (" + res.status + ")");
+    return body;
+  }
+
+  async function load() {
+    try {
+      const remote = await remoteGet();
+      if (remote) {
+        cacheSet(remote);
+        return remote;
+      }
+    } catch (e) {
+      console.warn("remote load failed, using cache", e);
+    }
+    return cacheGet();
+  }
+
+  async function save(data) {
+    cacheSet(data);
+    await remotePut(data);
+    return data;
+  }
+
+  function hasVotedLocal(teamId) {
+    const d = cacheGet();
+    const device = getDeviceId();
+    const key = device + ":" + teamId;
+    if (d.devices && d.devices[key]) return true;
+    return (d.votes || []).some((v) => v.device === device && v.team_id === teamId);
+  }
+
+  async function hasVoted(teamId) {
+    try {
+      const d = await load();
+      const device = getDeviceId();
+      const key = device + ":" + teamId;
+      if (d.devices && d.devices[key]) return true;
+      return (d.votes || []).some((v) => v.device === device && v.team_id === teamId);
+    } catch (_) {
+      return hasVotedLocal(teamId);
+    }
+  }
+
+  async function addVote(teamId, ranking, voterName) {
+    // retry read-modify-write a few times (naive concurrency)
+    let lastErr;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        const d = await load();
+        const device = getDeviceId();
+        const key = device + ":" + teamId;
+        if (d.devices && d.devices[key]) {
+          const err = new Error("Вы уже голосовали за эту команду с этого устройства.");
+          err.code = "ALREADY";
+          throw err;
+        }
+        if ((d.votes || []).some((v) => v.device === device && v.team_id === teamId)) {
+          const err = new Error("Вы уже голосовали за эту команду с этого устройства.");
+          err.code = "ALREADY";
+          throw err;
+        }
+        d.votes = d.votes || [];
+        d.devices = d.devices || {};
+        d.votes.push({
+          team_id: teamId,
+          ranking: ranking,
+          ts: Date.now(),
+          device: device,
+          name: voterName || "",
+        });
+        d.devices[key] = { ts: Date.now(), name: voterName || "" };
+        await save(d);
+        return d;
+      } catch (e) {
+        if (e.code === "ALREADY") throw e;
+        lastErr = e;
+        await new Promise((r) => setTimeout(r, 200 * (attempt + 1)));
+      }
+    }
+    throw lastErr || new Error("Не удалось сохранить голос");
+  }
+
+  async function bordaScores(teamId) {
     const cfg = window.POLL_CONFIG;
     const team = cfg.TEAMS[teamId];
     if (!team) return { ranked: [], vote_count: 0 };
@@ -464,7 +619,7 @@ window.POLL_CONFIG = {
     const n = members.length;
     const scores = Object.fromEntries(members.map((m) => [m, 0]));
     let voteCount = 0;
-    const data = load();
+    const data = await load();
     for (const vote of data.votes || []) {
       if (vote.team_id !== teamId) continue;
       voteCount++;
@@ -482,19 +637,26 @@ window.POLL_CONFIG = {
     return { ranked, vote_count: voteCount, name: team.name, member_count: n };
   }
 
-  function resetAll() {
-    save({ votes: [], meta: { created: Date.now(), reset_at: Date.now() }, votedTeams: [] });
+  async function resetAll() {
+    const data = emptyData();
+    data.meta.reset_at = Date.now();
+    await save(data);
+    return data;
+  }
+
+  async function totalBallots() {
+    const d = await load();
+    return (d.votes || []).length;
   }
 
   function exportJSON() {
-    return JSON.stringify(load(), null, 2);
+    return JSON.stringify(cacheGet(), null, 2);
   }
 
-  function importJSON(raw) {
+  async function importJSON(raw) {
     const data = JSON.parse(raw);
     if (!data || !Array.isArray(data.votes)) throw new Error("Неверный формат");
-    // merge votes by simple append of unique ts+device+team
-    const cur = load();
+    const cur = await load();
     const seen = new Set(
       (cur.votes || []).map((v) => `${v.team_id}|${v.ts}|${v.device || ""}`)
     );
@@ -505,27 +667,39 @@ window.POLL_CONFIG = {
         cur.votes.push(v);
         seen.add(k);
         added++;
+        if (v.device && v.team_id) {
+          cur.devices = cur.devices || {};
+          cur.devices[v.device + ":" + v.team_id] = { ts: v.ts || Date.now(), name: v.name || "" };
+        }
       }
     }
-    save(cur);
+    await save(cur);
     return added;
   }
 
-  function totalBallots() {
-    return (load().votes || []).length;
+  async function ping() {
+    try {
+      await remoteGet();
+      return { ok: true, mode: "cloud" };
+    } catch (e) {
+      return { ok: false, mode: "local", error: String(e.message || e) };
+    }
   }
 
   window.PollStore = {
     load,
     save,
     hasVoted,
-    markVoted,
+    hasVotedLocal,
     addVote,
     bordaScores,
     resetAll,
     exportJSON,
     importJSON,
     totalBallots,
+    getDeviceId,
+    ping,
+    cacheGet,
   };
 })();
 (function () {
@@ -577,38 +751,50 @@ window.POLL_CONFIG = {
 
     let touchItem = null;
     list.querySelectorAll(".rank-item").forEach((item) => {
-      item.addEventListener("touchstart", () => {
-        touchItem = item;
-        item.classList.add("dragging");
-      }, { passive: true });
+      item.addEventListener(
+        "touchstart",
+        () => {
+          touchItem = item;
+          item.classList.add("dragging");
+        },
+        { passive: true }
+      );
     });
-    list.addEventListener("touchmove", (e) => {
-      if (!touchItem) return;
-      e.preventDefault();
-      const touch = e.touches[0];
-      const el = document.elementFromPoint(touch.clientX, touch.clientY);
-      const target = el && el.closest(".rank-item");
-      if (target && target !== touchItem && list.contains(target)) {
-        const rect = target.getBoundingClientRect();
-        const mid = rect.top + rect.height / 2;
-        if (touch.clientY < mid) list.insertBefore(touchItem, target);
-        else list.insertBefore(touchItem, target.nextSibling);
-        renumber();
-      }
-    }, { passive: false });
-    list.addEventListener("touchend", () => {
-      if (touchItem) {
-        touchItem.classList.remove("dragging");
-        touchItem = null;
-        renumber();
-      }
-    }, { passive: true });
+    list.addEventListener(
+      "touchmove",
+      (e) => {
+        if (!touchItem) return;
+        e.preventDefault();
+        const touch = e.touches[0];
+        const el = document.elementFromPoint(touch.clientX, touch.clientY);
+        const target = el && el.closest(".rank-item");
+        if (target && target !== touchItem && list.contains(target)) {
+          const rect = target.getBoundingClientRect();
+          const mid = rect.top + rect.height / 2;
+          if (touch.clientY < mid) list.insertBefore(touchItem, target);
+          else list.insertBefore(touchItem, target.nextSibling);
+          renumber();
+        }
+      },
+      { passive: false }
+    );
+    list.addEventListener(
+      "touchend",
+      () => {
+        if (touchItem) {
+          touchItem.classList.remove("dragging");
+          touchItem = null;
+          renumber();
+        }
+      },
+      { passive: true }
+    );
   }
 
   window.initSortable = initSortable;
   window.getRanking = function (list) {
-    return Array.from(list.querySelectorAll(".rank-item")).map(
-      (li) => decodeURIComponent(li.getAttribute("data-name") || "")
+    return Array.from(list.querySelectorAll(".rank-item")).map((li) =>
+      decodeURIComponent(li.getAttribute("data-name") || "")
     );
   };
 })();
@@ -616,28 +802,71 @@ window.POLL_CONFIG = {
   const cfg = window.POLL_CONFIG;
   const root = document.getElementById("app");
 
-  function flash(msg, cat) {
+  function takeFlash() {
+    try {
+      const raw = sessionStorage.getItem("poll_flash");
+      if (!raw) return null;
+      sessionStorage.removeItem("poll_flash");
+      return JSON.parse(raw);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function pushFlash(msg, cat) {
+    try {
+      sessionStorage.setItem("poll_flash", JSON.stringify({ msg: msg, cat: cat || "success" }));
+    } catch (_) {}
+  }
+
+  function showFlash(msg, cat) {
     const el = document.getElementById("flash");
     if (!el) return;
     el.innerHTML = `<div class="flash flash-${cat || "success"}">${msg}</div>`;
-    setTimeout(() => { el.innerHTML = ""; }, 4000);
+    setTimeout(() => {
+      if (el) el.innerHTML = "";
+    }, 5000);
   }
 
-  function route() {
+  function applyPendingFlash() {
+    const f = takeFlash();
+    if (f) showFlash(f.msg, f.cat);
+  }
+
+  async function route() {
     const hash = location.hash.slice(1) || "/";
     const [path, qs] = hash.split("?");
     const params = new URLSearchParams(qs || "");
-    if (path === "/" || path === "") renderIndex();
-    else if (path.startsWith("/vote/")) renderVote(path.split("/")[2]);
-    else if (path === "/admin") renderAdmin(params.get("key") || "");
-    else renderIndex();
+    try {
+      if (path === "/" || path === "") await renderIndex();
+      else if (path.startsWith("/vote/")) await renderVote(path.split("/")[2]);
+      else if (path === "/admin") await renderAdmin(params.get("key") || "");
+      else await renderIndex();
+      applyPendingFlash();
+    } catch (e) {
+      root.innerHTML = `<div class="hero"><h1>Ошибка</h1><p class="subtitle">${e.message}</p>
+        <a class="back" href="#/">← На главную</a></div>`;
+    }
   }
 
-  function renderIndex() {
+  async function renderIndex() {
     document.title = cfg.TITLE;
-    const teamsHtml = Object.entries(cfg.TEAMS)
+    root.innerHTML = `<p style="color:#94a3b8;text-align:center;padding:3rem">Загрузка…</p>`;
+
+    const ping = await PollStore.ping();
+    const statusHtml = ping.ok
+      ? `<span class="pill success">☁ Общая база подключена</span>`
+      : `<span class="pill danger">⚠ База недоступна — голоса могут не синхронизироваться</span>`;
+
+    const entries = Object.entries(cfg.TEAMS);
+    const votedFlags = {};
+    for (const [tid] of entries) {
+      votedFlags[tid] = await PollStore.hasVoted(tid);
+    }
+
+    const teamsHtml = entries
       .map(([tid, team], i) => {
-        const done = PollStore.hasVoted(tid);
+        const done = votedFlags[tid];
         return `
         <a class="team-card ${done ? "done" : ""}"
            href="${done ? "#" : `#/vote/${tid}`}">
@@ -647,9 +876,11 @@ window.POLL_CONFIG = {
             <p>${team.members.length} участников</p>
           </div>
           <div class="team-action">
-            ${done
-              ? '<span class="pill success">✓ Голос учтён</span>'
-              : '<span class="pill">Ранжировать →</span>'}
+            ${
+              done
+                ? '<span class="pill success">✓ Голос учтён</span>'
+                : '<span class="pill">Ранжировать →</span>'
+            }
           </div>
         </a>`;
       })
@@ -660,6 +891,7 @@ window.POLL_CONFIG = {
       <header class="hero">
         <h1>${cfg.TITLE}</h1>
         <p class="subtitle">${cfg.SUBTITLE}</p>
+        <div style="margin-top:12px">${statusHtml}</div>
       </header>
       <section class="teams">${teamsHtml}</section>
       <footer class="foot">
@@ -668,11 +900,14 @@ window.POLL_CONFIG = {
       </footer>`;
   }
 
-  function renderVote(teamId) {
+  async function renderVote(teamId) {
     const team = cfg.TEAMS[teamId];
-    if (!team) { location.hash = "#/"; return; }
-    if (PollStore.hasVoted(teamId)) {
-      flash("Вы уже проголосовали за эту команду.", "warning");
+    if (!team) {
+      location.hash = "#/";
+      return;
+    }
+    if (await PollStore.hasVoted(teamId)) {
+      pushFlash("Вы уже проголосовали за эту команду.", "warning");
       location.hash = "#/";
       return;
     }
@@ -695,6 +930,10 @@ window.POLL_CONFIG = {
         <h1>${team.name}</h1>
         <p class="subtitle">Перетащите карточки: <strong>1 место = самый значимый</strong>. Обязательно расставьте всех.</p>
       </header>
+      <div class="voter-box">
+        <label for="voter-name">Ваше имя <span class="muted">(необязательно)</span></label>
+        <input id="voter-name" type="text" placeholder="Как вас записать в журнал голосов" maxlength="80" />
+      </div>
       <div class="hint-bar">
         <span>↑ Более значимый</span>
         <span>${team.members.length} / ${team.members.length}</span>
@@ -709,16 +948,26 @@ window.POLL_CONFIG = {
 
     const list = document.getElementById("sortable");
     initSortable(list);
-    document.getElementById("submit-btn").addEventListener("click", () => {
+    const btn = document.getElementById("submit-btn");
+    btn.addEventListener("click", async () => {
       const ranking = getRanking(list);
       const expected = new Set(team.members);
       if (ranking.length !== expected.size || ranking.some((n) => !expected.has(n))) {
-        flash("Нужно расставить ВСЕХ участников.", "error");
+        showFlash("Нужно расставить ВСЕХ участников.", "error");
         return;
       }
-      PollStore.addVote(teamId, ranking);
-      flash(`Спасибо! Ваш рейтинг для «${team.name}» сохранён.`, "success");
-      location.hash = "#/";
+      const voterName = (document.getElementById("voter-name").value || "").trim();
+      btn.disabled = true;
+      btn.textContent = "Сохраняем…";
+      try {
+        await PollStore.addVote(teamId, ranking, voterName);
+        pushFlash(`Спасибо! Голос за «${team.name}» сохранён в общую базу.`, "success");
+        location.hash = "#/";
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = "Отправить рейтинг";
+        showFlash(e.message || "Ошибка сохранения", "error");
+      }
     });
   }
 
@@ -729,7 +978,7 @@ window.POLL_CONFIG = {
     return n + " голосов";
   }
 
-  function renderAdmin(key) {
+  async function renderAdmin(key) {
     if (key !== cfg.ADMIN_SECRET) {
       root.innerHTML = `
         <div class="hero">
@@ -740,14 +989,17 @@ window.POLL_CONFIG = {
       return;
     }
     document.title = "Результаты — " + cfg.TITLE;
-    const total = PollStore.totalBallots();
-    const cards = Object.keys(cfg.TEAMS)
-      .map((tid) => {
-        const res = PollStore.bordaScores(tid);
-        const rows =
-          res.vote_count === 0
-            ? `<p class="empty">Пока нет голосов</p>`
-            : `<ol class="results-list">
+    root.innerHTML = `<p style="color:#94a3b8;text-align:center;padding:3rem">Загрузка результатов…</p>`;
+
+    const total = await PollStore.totalBallots();
+    const ping = await PollStore.ping();
+    const cardsParts = [];
+    for (const tid of Object.keys(cfg.TEAMS)) {
+      const res = await PollStore.bordaScores(tid);
+      const rows =
+        res.vote_count === 0
+          ? `<p class="empty">Пока нет голосов</p>`
+          : `<ol class="results-list">
             ${res.ranked
               .map((item) => {
                 const pct = item.max_points ? (item.points / item.max_points) * 100 : 0;
@@ -761,16 +1013,15 @@ window.POLL_CONFIG = {
               })
               .join("")}
           </ol>`;
-        return `
+      cardsParts.push(`
         <section class="result-card">
           <div class="result-head">
             <h2>${res.name}</h2>
             <span class="pill">${pluralVotes(res.vote_count)}</span>
           </div>
           ${rows}
-        </section>`;
-      })
-      .join("");
+        </section>`);
+    }
 
     root.innerHTML = `
       <div id="flash" class="flash-wrap"></div>
@@ -778,47 +1029,74 @@ window.POLL_CONFIG = {
         <a class="back" href="#/">← На главную</a>
         <h1>📊 Результаты</h1>
         <p class="subtitle">Всего бюллетеней: <strong>${total}</strong> · Borda: 1 место = N очков, последнее = 1</p>
+        <p class="subtitle">${
+          ping.ok
+            ? "☁ Голоса в общей облачной базе (все устройства)"
+            : "⚠ Облако недоступно: " + (ping.error || "")
+        }</p>
       </header>
-      <div class="note-banner">
-        Голоса хранятся в браузере (localStorage). Чтобы объединить голоса с других устройств — экспортируйте JSON у каждого и импортируйте здесь.
+
+      <div class="reset-box">
+        <div>
+          <strong>Скинуть голосование</strong>
+          <p class="muted">Удалит ВСЕ голоса из общей базы. Действие необратимо.</p>
+        </div>
+        <button type="button" class="btn danger big" id="btn-reset-main">Скинуть голосование</button>
       </div>
-      <div class="admin-grid">${cards}</div>
+
+      <div class="admin-grid">${cardsParts.join("")}</div>
       <div class="import-box">
-        <strong>Экспорт / импорт голосов</strong>
+        <strong>Экспорт / импорт (резервная копия)</strong>
         <textarea id="io-json" placeholder="JSON голосов…"></textarea>
         <div class="row">
           <button type="button" class="btn secondary" id="btn-export">Экспорт</button>
           <button type="button" class="btn secondary" id="btn-import">Импорт (merge)</button>
-          <button type="button" class="btn danger" id="btn-reset">Сбросить все голоса</button>
+          <button type="button" class="btn danger" id="btn-reset">Скинуть голосование</button>
         </div>
       </div>
       <footer class="foot">
         <p>Админ-ссылка: <code>/#/admin?key=${cfg.ADMIN_SECRET}</code></p>
       </footer>`;
 
-    document.getElementById("btn-export").onclick = () => {
-      document.getElementById("io-json").value = PollStore.exportJSON();
-      flash("Экспортировано в поле ниже.", "success");
-    };
-    document.getElementById("btn-import").onclick = () => {
+    async function doReset() {
+      if (!confirm("СКИНУТЬ ВСЕ ГОЛОСА из общей базы? Это нельзя отменить.")) return;
       try {
-        const n = PollStore.importJSON(document.getElementById("io-json").value);
-        flash(`Добавлено новых голосов: ${n}`, "success");
-        renderAdmin(key);
+        await PollStore.resetAll();
+        pushFlash("Голосование сброшено. Все голоса удалены.", "success");
+        await renderAdmin(key);
+        applyPendingFlash();
       } catch (e) {
-        flash("Ошибка импорта: " + e.message, "error");
+        showFlash("Ошибка сброса: " + e.message, "error");
+      }
+    }
+
+    document.getElementById("btn-reset-main").onclick = doReset;
+    document.getElementById("btn-reset").onclick = doReset;
+
+    document.getElementById("btn-export").onclick = async () => {
+      try {
+        const d = await PollStore.load();
+        document.getElementById("io-json").value = JSON.stringify(d, null, 2);
+        showFlash("Экспортировано.", "success");
+      } catch (e) {
+        showFlash(e.message, "error");
       }
     };
-    document.getElementById("btn-reset").onclick = () => {
-      if (confirm("Сбросить ВСЕ голоса на этом устройстве?")) {
-        PollStore.resetAll();
-        flash("Все голоса сброшены.", "success");
-        renderAdmin(key);
+    document.getElementById("btn-import").onclick = async () => {
+      try {
+        const n = await PollStore.importJSON(document.getElementById("io-json").value);
+        showFlash(`Добавлено новых голосов: ${n}`, "success");
+        await renderAdmin(key);
+        applyPendingFlash();
+      } catch (e) {
+        showFlash("Ошибка импорта: " + e.message, "error");
       }
     };
   }
 
-  window.addEventListener("hashchange", route);
+  window.addEventListener("hashchange", () => {
+    route();
+  });
   route();
 })();
 

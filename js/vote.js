@@ -47,38 +47,50 @@
 
     let touchItem = null;
     list.querySelectorAll(".rank-item").forEach((item) => {
-      item.addEventListener("touchstart", () => {
-        touchItem = item;
-        item.classList.add("dragging");
-      }, { passive: true });
+      item.addEventListener(
+        "touchstart",
+        () => {
+          touchItem = item;
+          item.classList.add("dragging");
+        },
+        { passive: true }
+      );
     });
-    list.addEventListener("touchmove", (e) => {
-      if (!touchItem) return;
-      e.preventDefault();
-      const touch = e.touches[0];
-      const el = document.elementFromPoint(touch.clientX, touch.clientY);
-      const target = el && el.closest(".rank-item");
-      if (target && target !== touchItem && list.contains(target)) {
-        const rect = target.getBoundingClientRect();
-        const mid = rect.top + rect.height / 2;
-        if (touch.clientY < mid) list.insertBefore(touchItem, target);
-        else list.insertBefore(touchItem, target.nextSibling);
-        renumber();
-      }
-    }, { passive: false });
-    list.addEventListener("touchend", () => {
-      if (touchItem) {
-        touchItem.classList.remove("dragging");
-        touchItem = null;
-        renumber();
-      }
-    }, { passive: true });
+    list.addEventListener(
+      "touchmove",
+      (e) => {
+        if (!touchItem) return;
+        e.preventDefault();
+        const touch = e.touches[0];
+        const el = document.elementFromPoint(touch.clientX, touch.clientY);
+        const target = el && el.closest(".rank-item");
+        if (target && target !== touchItem && list.contains(target)) {
+          const rect = target.getBoundingClientRect();
+          const mid = rect.top + rect.height / 2;
+          if (touch.clientY < mid) list.insertBefore(touchItem, target);
+          else list.insertBefore(touchItem, target.nextSibling);
+          renumber();
+        }
+      },
+      { passive: false }
+    );
+    list.addEventListener(
+      "touchend",
+      () => {
+        if (touchItem) {
+          touchItem.classList.remove("dragging");
+          touchItem = null;
+          renumber();
+        }
+      },
+      { passive: true }
+    );
   }
 
   window.initSortable = initSortable;
   window.getRanking = function (list) {
-    return Array.from(list.querySelectorAll(".rank-item")).map(
-      (li) => decodeURIComponent(li.getAttribute("data-name") || "")
+    return Array.from(list.querySelectorAll(".rank-item")).map((li) =>
+      decodeURIComponent(li.getAttribute("data-name") || "")
     );
   };
 })();
