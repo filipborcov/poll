@@ -1,49 +1,44 @@
-const { readStore, writeStore, cors, token } = require("./_store");
+const { cors, listBallots, addBallot } = require("./_db");
 
 module.exports = async function handler(req, res) {
   cors(res);
   if (req.method === "OPTIONS") return res.status(204).end();
   if (req.method !== "POST") return res.status(405).json({ error: "POST only" });
   try {
-    if (!token()) {
-      return res.status(503).json({
-        error: "no_db",
-        message: "Добавьте POLL_GITHUB_TOKEN в Vercel → Environment Variables",
-      });
-    }
     const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
     const team_id = body.team_id;
-    const ranking = body.ranking;
+    const ranking = body.ranking; // array of names OR compact string in body.r
     const device = String(body.device || "anon").slice(0, 80);
     const name = String(body.name || "").slice(0, 80);
-    if (!team_id || !Array.isArray(ranking) || !ranking.length) {
-      return res.status(400).json({ error: "нужны team_id и ranking" });
+    let r = body.r;
+    if (!r && Array.isArray(ranking)) {
+      // Client may send ranking as names; store as comma indices only if r provided.
+      // Prefer body.r (compact). If only names — store as JSON string of names (short teams ok).
+      r = ranking.map(String).join("||");
+      // Better: client always sends compact r. Fallback keep names joined.
     }
-    const key = device + ":" + team_id;
-
-    for (let i = 0; i < 6; i++) {
-      try {
-        const { data, sha } = await readStore();
-        data.votes = data.votes || [];
-        data.devices = data.devices || {};
-        if (data.devices[key] || data.votes.some((v) => v.device === device && v.team_id === team_id)) {
-          return res.status(409).json({ error: "already", message: "Уже голосовали с этого устройства" });
-        }
-        data.votes.push({ team_id, ranking, ts: Date.now(), device, name });
-        data.devices[key] = { ts: Date.now(), name };
-        data.meta = Object.assign({}, data.meta || {}, { updated: Date.now() });
-        await writeStore(data, sha);
-        return res.status(200).json({ ok: true, total: data.votes.length });
-      } catch (e) {
-        if (e.status === 409) {
-          await new Promise((r) => setTimeout(r, 150 * (i + 1)));
-          continue;
-        }
-        throw e;
-      }
+    if (!team_id || (!r && !(Array.isArray(ranking) && ranking.length))) {
+      return res.status(400).json({ error: "need team_id and ranking" });
     }
-    return res.status(500).json({ error: "не удалось сохранить после повторов" });
+    const all = await listBallots();
+    if (all.some((v) => (v.d || v.device) === device && (v.t || v.team_id) === team_id)) {
+      return res.status(409).json({ error: "already", message: "Уже голосовали с этого устройства" });
+    }
+    const payload = {
+      t: team_id,
+      r: r || "",
+      d: device,
+      n: name,
+      ts: Date.now(),
+    };
+    // If client sent name ranking without r, encode positions unknown server-side — store names as || 
+    if (!body.r && Array.isArray(ranking)) {
+      payload.r = ranking.join("||");
+      payload._fmt = "names";
+    }
+    const saved = await addBallot(payload);
+    return res.status(200).json({ ok: true, id: saved._id, total: all.length + 1 });
   } catch (e) {
-    return res.status(e.status || 500).json({ error: e.message });
+    return res.status(502).json({ error: String(e.message || e) });
   }
 };
