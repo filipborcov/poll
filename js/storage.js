@@ -1,5 +1,4 @@
 (function () {
-  const LOCAL_KEY = "team-rank-poll-v7";
   const DEVICE_KEY = "team-rank-poll-device";
 
   function getDeviceId() {
@@ -11,116 +10,65 @@
     return id;
   }
 
-  function cfg() { return window.POLL_CONFIG || {}; }
-
-  function cacheGet() {
-    try {
-      const raw = localStorage.getItem(LOCAL_KEY);
-      if (raw) return JSON.parse(raw);
-    } catch (_) {}
-    return { votes: [], devices: {}, meta: {} };
-  }
-  function cacheSet(data) {
-    try { localStorage.setItem(LOCAL_KEY, JSON.stringify(data)); } catch (_) {}
-  }
-
-  function api(path) {
-    const base = (cfg().API_BASE || "").replace(/\/$/, "");
-    return base + path;
-  }
-
-  async function loadFromRaw() {
-    const url = (cfg().GH_RAW || "") + (cfg().GH_RAW && cfg().GH_RAW.indexOf("?") >= 0 ? "&" : "?") + "_=" + Date.now();
-    const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) throw new Error("Не удалось загрузить результаты (" + res.status + ")");
-    const data = await res.json();
-    if (!Array.isArray(data.votes)) data.votes = [];
-    if (!data.devices) data.devices = {};
-    if (!data.meta) data.meta = {};
-    cacheSet(data);
-    return data;
-  }
-
-  async function loadFromApi() {
-    const res = await fetch(api("/api/votes") + "?_=" + Date.now(), { cache: "no-store" });
-    if (res.status === 404 || res.status === 503) return null;
-    if (!res.ok) throw new Error("API " + res.status);
-    const data = await res.json();
-    if (!Array.isArray(data.votes)) data.votes = [];
-    cacheSet(data);
-    return data;
+  async function api(path, opts) {
+    const res = await fetch(path, opts);
+    let data = null;
+    try { data = await res.json(); } catch (_) {}
+    return { res, data };
   }
 
   async function load() {
-    try {
-      const apiData = await loadFromApi();
-      if (apiData) return apiData;
-    } catch (e) {
-      console.warn("api load", e);
-    }
-    return loadFromRaw();
+    const { res, data } = await api("/api/votes?_=" + Date.now(), { cache: "no-store" });
+    if (!res.ok) throw new Error((data && data.error) || "Не удалось загрузить базу (" + res.status + ")");
+    return {
+      votes: (data && data.votes) || [],
+      devices: (data && data.devices) || {},
+      meta: (data && data.meta) || {},
+    };
   }
 
   async function loadVotes() {
-    return (await load()).votes || [];
+    return (await load()).votes;
   }
 
   async function hasVoted(teamId) {
     const device = getDeviceId();
-    const data = await load();
-    const key = device + ":" + teamId;
-    if (data.devices && data.devices[key]) return true;
-    return (data.votes || []).some((v) => v.device === device && v.team_id === teamId);
+    const d = await load();
+    if (d.devices[device + ":" + teamId]) return true;
+    return d.votes.some((v) => v.device === device && v.team_id === teamId);
   }
 
   async function addVote(teamId, ranking, voterName) {
-    const device = getDeviceId();
-    // local already-voted check
-    const cur = await load();
-    if ((cur.votes || []).some((v) => v.device === device && v.team_id === teamId)) {
-      const err = new Error("Вы уже голосовали за эту команду с этого устройства.");
-      err.code = "ALREADY";
-      throw err;
-    }
-    const res = await fetch(api("/api/vote"), {
+    const { res, data } = await api("/api/vote", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         team_id: teamId,
         ranking: ranking,
-        device: device,
-        name: String(voterName || "").slice(0, 80),
+        device: getDeviceId(),
+        name: voterName || "",
       }),
     });
-    let data = {};
-    try { data = await res.json(); } catch (_) {}
     if (res.status === 409) {
-      const err = new Error(data.message || "Уже голосовали");
-      err.code = "ALREADY";
-      throw err;
+      const e = new Error((data && data.message) || "Уже голосовали");
+      e.code = "ALREADY";
+      throw e;
     }
     if (res.status === 503) {
-      throw new Error(
-        "Сервер ещё не настроен для записи голосов. Админу: в Vercel → Environment Variables добавьте POLL_GITHUB_TOKEN (GitHub PAT с правом contents:write)."
-      );
+      throw new Error("База не подключена. Нужен POLL_GITHUB_TOKEN в Vercel (1 минута).");
     }
-    if (!res.ok) {
-      throw new Error(data.error || data.message || "Ошибка сохранения (" + res.status + ")");
-    }
-    // refresh cache from source of truth
-    try { await load(); } catch (_) {}
+    if (!res.ok) throw new Error((data && (data.error || data.message)) || "Ошибка " + res.status);
     return data;
   }
 
   async function bordaScores(teamId) {
-    const team = (cfg().TEAMS || {})[teamId];
+    const team = (window.POLL_CONFIG.TEAMS || {})[teamId];
     if (!team) return { ranked: [], vote_count: 0, name: "", member_count: 0 };
     const members = team.members;
     const n = members.length;
     const scores = Object.fromEntries(members.map((m) => [m, 0]));
     let voteCount = 0;
-    const votes = await loadVotes();
-    for (const vote of votes) {
+    for (const vote of await loadVotes()) {
       if (vote.team_id !== teamId) continue;
       voteCount++;
       (vote.ranking || []).forEach((name, pos) => {
@@ -138,19 +86,13 @@
   }
 
   async function resetAll() {
-    const key = cfg().ADMIN_SECRET;
-    const res = await fetch(api("/api/reset"), {
+    const key = window.POLL_CONFIG.ADMIN_SECRET;
+    const { res, data } = await api("/api/reset", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-Admin-Key": key },
-      body: JSON.stringify({ key: key }),
+      body: JSON.stringify({ key }),
     });
-    let data = {};
-    try { data = await res.json(); } catch (_) {}
-    if (res.status === 503) {
-      throw new Error("Нужен POLL_GITHUB_TOKEN в Vercel Environment Variables");
-    }
-    if (!res.ok) throw new Error(data.error || "Сброс не удался (" + res.status + ")");
-    cacheSet({ votes: [], devices: {}, meta: { reset_at: Date.now() } });
+    if (!res.ok) throw new Error((data && data.error) || "Сброс не удался");
   }
 
   async function totalBallots() {
@@ -158,50 +100,24 @@
   }
 
   function exportJSON() {
-    return JSON.stringify(cacheGet(), null, 2);
+    return "{}";
   }
-
-  async function importJSON(raw) {
-    const incoming = JSON.parse(raw);
-    if (!incoming || !Array.isArray(incoming.votes)) throw new Error("Неверный формат");
-    let added = 0;
-    for (const v of incoming.votes) {
-      try {
-        const res = await fetch(api("/api/vote"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            team_id: v.team_id,
-            ranking: v.ranking,
-            device: (v.device || "import") + "_" + (v.ts || Date.now()),
-            name: v.name || "",
-          }),
-        });
-        if (res.ok) added++;
-      } catch (_) {}
-    }
-    return added;
-  }
+  async function importJSON() { return 0; }
 
   async function ping() {
     try {
-      const data = await load();
-      const count = (data.votes || []).length;
-      // check if write API is configured
-      let writeOk = false;
-      try {
-        const r = await fetch(api("/api/votes"), { cache: "no-store" });
-        writeOk = r.ok;
-      } catch (_) {}
-      return { ok: true, mode: writeOk ? "github+api" : "github-read", count: count };
+      const d = await load();
+      // probe write capability lightly: if votes endpoint works with auth path
+      const { res } = await api("/api/votes?_=" + Date.now());
+      return { ok: res.ok, mode: "db", count: (d.votes || []).length };
     } catch (e) {
-      return { ok: false, mode: "none", error: String(e.message || e) };
+      return { ok: false, mode: "down", error: String(e.message || e) };
     }
   }
 
   window.PollStore = {
     load, loadVotes, hasVoted, addVote, bordaScores, resetAll,
     exportJSON, importJSON, totalBallots, getDeviceId, ping,
-    getMode: () => "github", cacheGet,
+    getMode: () => "db", cacheGet: () => ({ votes: [] }),
   };
 })();

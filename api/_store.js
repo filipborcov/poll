@@ -10,14 +10,14 @@ function empty() {
   return { votes: [], devices: {}, meta: { created: Date.now() } };
 }
 
-async function gh(pathname, opts = {}) {
+async function gh(path, opts = {}) {
   const t = token();
   if (!t) {
-    const err = new Error("POLL_GITHUB_TOKEN is not configured on Vercel");
-    err.status = 503;
-    throw err;
+    const e = new Error("Нет POLL_GITHUB_TOKEN");
+    e.status = 503;
+    throw e;
   }
-  const res = await fetch("https://api.github.com" + pathname, {
+  const res = await fetch("https://api.github.com" + path, {
     ...opts,
     headers: {
       Accept: "application/vnd.github+json",
@@ -32,13 +32,11 @@ async function gh(pathname, opts = {}) {
 
 async function readStore() {
   const res = await gh(`/repos/${OWNER}/${REPO}/contents/${PATH}`);
-  if (res.status === 404) {
-    return { data: empty(), sha: null };
-  }
+  if (res.status === 404) return { data: empty(), sha: null };
   if (!res.ok) {
-    const err = new Error("GitHub read failed: " + res.status);
-    err.status = 502;
-    throw err;
+    const e = new Error("Чтение БД: " + res.status);
+    e.status = 502;
+    throw e;
   }
   const json = await res.json();
   const text = Buffer.from(json.content.replace(/\n/g, ""), "base64").toString("utf8");
@@ -56,19 +54,24 @@ async function readStore() {
 
 async function writeStore(data, sha) {
   const body = {
-    message: "chore(poll): update votes " + new Date().toISOString(),
-    content: Buffer.from(JSON.stringify(data), "utf8").toString("base64"),
-    sha: sha || undefined,
+    message: "poll vote " + new Date().toISOString(),
+    content: Buffer.from(JSON.stringify(data, null, 0), "utf8").toString("base64"),
   };
+  if (sha) body.sha = sha;
   const res = await gh(`/repos/${OWNER}/${REPO}/contents/${PATH}`, {
     method: "PUT",
     body: JSON.stringify(body),
   });
+  if (res.status === 409) {
+    const e = new Error("conflict");
+    e.status = 409;
+    throw e;
+  }
   if (!res.ok) {
-    const txt = await res.text();
-    const err = new Error("GitHub write failed: " + res.status + " " + txt.slice(0, 200));
-    err.status = res.status === 409 ? 409 : 502;
-    throw err;
+    const t = await res.text();
+    const e = new Error("Запись БД: " + res.status + " " + t.slice(0, 150));
+    e.status = 502;
+    throw e;
   }
   return res.json();
 }

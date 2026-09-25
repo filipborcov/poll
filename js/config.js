@@ -1,13 +1,7 @@
 window.POLL_CONFIG = {
   ADMIN_SECRET: "rank2026admin",
   TITLE: "Рейтинг значимости участников",
-  SUBTITLE: "Расставьте всех участников команды от самого значимого к менее значимому. Один голос на команду.",
-  // Votes file in GitHub (public read). Writes go through same-origin /api/* on Vercel.
-  GH_OWNER: "filipborcov",
-  GH_REPO: "poll",
-  GH_PATH: "data/votes.json",
-  GH_RAW: "https://raw.githubusercontent.com/filipborcov/poll/main/data/votes.json",
-  API_BASE: "", // same origin
+  SUBTITLE: "Расставьте участников от самого значимого (верх) к менее значимому (низ). Один голос на команду с устройства.",
   TEAMS: {
     team1: {
       name: "Команда А",
