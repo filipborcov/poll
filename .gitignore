@@ -1,14 +1,4 @@
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-.env
-.venv
-venv/
-data/votes.json
-data/*.tmp
-*.log
 .DS_Store
-.idea/
-.vscode/
+.vercel
+node_modules/
+*.log

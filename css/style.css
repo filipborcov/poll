@@ -286,3 +286,57 @@ body {
   border-radius: 6px;
   font-size: .8rem;
 }
+
+/* SPA extras */
+.hidden { display: none !important; }
+.admin-link {
+  display: inline-block;
+  margin-top: 1rem;
+  color: var(--muted);
+  font-size: .8rem;
+  text-decoration: none;
+}
+.admin-link:hover { color: var(--primary2); }
+.import-box {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.import-box textarea {
+  width: 100%;
+  min-height: 100px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  padding: .75rem;
+  font-family: ui-monospace, monospace;
+  font-size: .8rem;
+  margin: .5rem 0;
+  resize: vertical;
+}
+.import-box .row {
+  display: flex;
+  gap: .5rem;
+  flex-wrap: wrap;
+}
+.btn.secondary {
+  background: rgba(99,102,241,.15);
+  color: var(--primary2);
+  border: 1px solid rgba(99,102,241,.3);
+  max-width: none;
+  width: auto;
+  padding: .65rem 1rem;
+  font-size: .9rem;
+}
+.note-banner {
+  background: rgba(234,179,8,.1);
+  border: 1px solid rgba(234,179,8,.25);
+  color: #facc15;
+  padding: .75rem 1rem;
+  border-radius: 12px;
+  font-size: .85rem;
+  margin-bottom: 1.25rem;
+}
