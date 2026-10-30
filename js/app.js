@@ -120,6 +120,7 @@
         <span class="handle" title="Перетащить">⠿</span>
         <span class="place">${i + 1}</span>
         <span class="name">${m}</span>
+        <button type="button" class="skip-btn" title="Не знаю / не работаю с этим человеком">Не знаю</button>
       </li>`
       )
       .join("");
@@ -130,28 +131,60 @@
         <a class="back" href="#/">← Назад</a>
         <h1>${team.name}</h1>
         ${team.desc ? `<p class="subtitle poll-desc">${team.desc}</p>` : ""}
-        <p class="subtitle">Перетащите карточки: <strong>1 место = лучший</strong>. Обязательно расставьте всех.</p>
+        <p class="subtitle">Перетащите карточки: <strong>1 место = лучший</strong>. Если не знаете человека или не работаете с ним, нажмите «Не знаю».</p>
       </header>
       <div class="hint-bar">
         <span>↑ Лучше</span>
-        <span>${team.members.length} / ${team.members.length}</span>
+        <span id="rank-count">${team.members.length} / ${team.members.length}</span>
         <span>Хуже ↓</span>
       </div>
       <ul id="sortable" class="rank-list" aria-label="Список для ранжирования">
         ${items}
       </ul>
+      <div id="skipped-wrap" class="skipped-wrap hidden">
+        <div class="skipped-title">Не знаю / не работаю с ними — в этом голосовании не оцениваются</div>
+        <ul id="skipped" class="rank-list skipped-list"></ul>
+      </div>
       <div class="actions sticky-actions">
         <button type="button" class="btn primary" id="submit-btn">Отправить рейтинг</button>
       </div>`;
 
     const list = document.getElementById("sortable");
+    const skipped = document.getElementById("skipped");
+    const skippedWrap = document.getElementById("skipped-wrap");
     initSortable(list);
+
+    function refresh() {
+      list.querySelectorAll(".rank-item").forEach((li, i) => (li.querySelector(".place").textContent = String(i + 1)));
+      const n = list.querySelectorAll(".rank-item").length;
+      document.getElementById("rank-count").textContent = `${n} / ${team.members.length}`;
+      skippedWrap.classList.toggle("hidden", !skipped.children.length);
+    }
+
+    // "Don't know" moves a person out of the ranking; "Вернуть" puts them back at the bottom.
+    root.addEventListener("click", (e) => {
+      const b = e.target.closest(".skip-btn");
+      if (!b) return;
+      const li = b.closest(".rank-item");
+      if (list.contains(li)) {
+        li.draggable = false;
+        li.classList.add("is-skipped");
+        b.textContent = "Вернуть";
+        skipped.appendChild(li);
+      } else {
+        li.draggable = true;
+        li.classList.remove("is-skipped");
+        b.textContent = "Не знаю";
+        list.appendChild(li);
+      }
+      refresh();
+    });
     const btn = document.getElementById("submit-btn");
     btn.addEventListener("click", async () => {
       const ranking = getRanking(list);
       const expected = new Set(team.members);
-      if (ranking.length !== expected.size || ranking.some((n) => !expected.has(n))) {
-        showFlash("Нужно расставить ВСЕХ участников.", "error");
+      if (!ranking.length || new Set(ranking).size !== ranking.length || ranking.some((n) => !expected.has(n))) {
+        showFlash("Оставьте в списке хотя бы одного человека.", "error");
         return;
       }
       const voterName = "";
@@ -194,17 +227,20 @@
     const ping = await PollStore.ping();
     const pollIds = Object.keys(cfg.TEAMS);
     const people = cfg.PEOPLE || cfg.TEAMS[pollIds[0]].members;
-    const n = people.length;
-    // Per poll: average Borda score per ballot (1..N), so polls with more voters don't weigh more.
-    const avg = {};
+    // Per poll: average percentile score (0..100) over the ballots that ranked the person.
+    const scores = {};
+    const votesOf = {};
     const counts = {};
-    people.forEach((p) => (avg[p] = {}));
+    people.forEach((p) => ((scores[p] = {}), (votesOf[p] = 0)));
+    const fmt = (v) => (v == null ? "—" : String(Math.round(v)));
     const cardsParts = [];
     for (const tid of pollIds) {
-      const res = await PollStore.bordaScores(tid, allVotes);
+      const res = await PollStore.pollScores(tid, allVotes);
       counts[tid] = res.vote_count;
       res.ranked.forEach((item) => {
-        if (avg[item.name]) avg[item.name][tid] = res.vote_count ? item.points / res.vote_count : null;
+        if (!scores[item.name]) return;
+        scores[item.name][tid] = item.score;
+        votesOf[item.name] += item.votes;
       });
       const rows =
         res.vote_count === 0
@@ -212,13 +248,12 @@
           : `<ol class="results-list">
             ${res.ranked
               .map((item) => {
-                const pct = item.max_points ? (item.points / item.max_points) * 100 : 0;
-                const top = item.place <= 3 ? "top" : "";
+                const top = item.place <= 3 && item.score != null ? "top" : "";
                 return `<li class="result-row ${top}">
                   <span class="r-place">${item.place}</span>
                   <span class="r-name">${item.name}</span>
-                  <span class="r-pts"><strong>${item.points}</strong> <small>очк.</small></span>
-                  <div class="r-bar-wrap"><div class="r-bar" style="width:${pct}%"></div></div>
+                  <span class="r-pts"><strong>${fmt(item.score)}</strong> <small>· ${item.votes} гол.</small></span>
+                  <div class="r-bar-wrap"><div class="r-bar" style="width:${item.score || 0}%"></div></div>
                 </li>`;
               })
               .join("")}
@@ -233,36 +268,38 @@
         </section>`);
     }
 
+    // Overall = average of the person's poll scores (polls where nobody rated them are left out).
     const summary = people
       .map((name) => {
-        const vals = pollIds.map((tid) => avg[name][tid]);
-        const total = vals.reduce((a, v) => a + (v || 0), 0);
-        return { name, vals, total };
+        const vals = pollIds.map((tid) => scores[name][tid]);
+        const have = vals.filter((v) => v != null);
+        const total = have.length ? have.reduce((a, v) => a + v, 0) / have.length : null;
+        return { name, vals, total, votes: votesOf[name] };
       })
-      .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
-    const fmt = (v) => (v == null ? "—" : v.toFixed(1));
-    const maxTotal = n * pollIds.length;
+      .sort((a, b) => (b.total ?? -1) - (a.total ?? -1) || b.votes - a.votes || a.name.localeCompare(b.name));
     const summaryHtml = `
       <section class="result-card summary-card">
         <div class="result-head">
           <h2>🏆 Общий рейтинг</h2>
-          <span class="pill">средний балл, макс. ${n} за голосование</span>
+          <span class="pill">0–100: 1 место = 100, последнее = 0</span>
         </div>
         <div class="table-wrap">
           <table class="summary">
             <thead><tr>
               <th>#</th><th class="l">Человек</th>
               ${pollIds.map((tid) => `<th title="${cfg.TEAMS[tid].desc || ""}">${cfg.TEAMS[tid].short || cfg.TEAMS[tid].name}<br><small>${pluralVotes(counts[tid])}</small></th>`).join("")}
-              <th>Итого<br><small>из ${maxTotal}</small></th>
+              <th>Итого<br><small>среднее</small></th>
+              <th>Голосов<br><small>оценили</small></th>
             </tr></thead>
             <tbody>
               ${summary
                 .map(
-                  (row, i) => `<tr class="${i < 3 ? "top top" + (i + 1) : ""}">
+                  (row, i) => `<tr class="${i < 3 && row.total != null ? "top top" + (i + 1) : ""}">
                 <td class="pl">${i + 1}</td>
                 <td class="l">${row.name}</td>
                 ${row.vals.map((v) => `<td>${fmt(v)}</td>`).join("")}
-                <td class="tot">${row.total.toFixed(1)}</td>
+                <td class="tot">${fmt(row.total)}</td>
+                <td class="vc">${row.votes}</td>
               </tr>`
                 )
                 .join("")}
@@ -276,7 +313,7 @@
       <header class="hero">
         <a class="back" href="#/">← На главную</a>
         <h1>📊 Результаты</h1>
-        <p class="subtitle">Всего бюллетеней: <strong>${total}</strong> · Borda: 1 место = N очков, последнее = 1</p>
+        <p class="subtitle">Всего бюллетеней: <strong>${total}</strong> · балл = место в процентах: 1-е = 100, последнее = 0; «Не знаю» не учитывается</p>
         <p class="subtitle">${
           ping.ok
             ? "☁ База онлайн, бюллетеней: " + (ping.count || 0)

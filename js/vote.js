@@ -27,7 +27,7 @@
         e.preventDefault();
         e.dataTransfer.dropEffect = "move";
         const target = e.currentTarget;
-        if (!dragEl || target === dragEl) return;
+        if (!dragEl || target === dragEl || !list.contains(target)) return;
         target.classList.add("drag-over");
         const rect = target.getBoundingClientRect();
         const mid = rect.top + rect.height / 2;

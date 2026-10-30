@@ -141,28 +141,32 @@
     return ids;
   }
 
-  async function bordaScores(teamId, allVotes) {
+  // Score of one ballot for a person = their place as a percentile of that ballot:
+  // 1st = 100, last = 0, a one-person ballot = 100. People a voter skipped ("don't know")
+  // simply aren't on that ballot, so a person's poll score averages only the ballots that ranked them.
+  async function pollScores(teamId, allVotes) {
     const team = (window.POLL_CONFIG.TEAMS || {})[teamId];
     if (!team) return { ranked: [], vote_count: 0, name: "", member_count: 0 };
     const members = team.members;
-    const n = members.length;
-    const scores = Object.fromEntries(members.map((m) => [m, 0]));
+    const sum = Object.fromEntries(members.map((m) => [m, 0]));
+    const cnt = Object.fromEntries(members.map((m) => [m, 0]));
     let voteCount = 0;
     for (const vote of allVotes || (await loadVotes())) {
       if (vote.team_id !== teamId) continue;
+      const ranking = (vote.ranking || []).filter((name) => name in sum);
+      if (!ranking.length) continue;
       voteCount++;
-      (vote.ranking || []).forEach((name, pos) => {
-        if (name in scores) scores[name] += n - pos;
+      const k = ranking.length;
+      ranking.forEach((name, pos) => {
+        sum[name] += k === 1 ? 100 : (100 * (k - 1 - pos)) / (k - 1);
+        cnt[name] += 1;
       });
     }
-    const ranked = Object.entries(scores)
-      .map(([name, points]) => ({ name, points }))
-      .sort((a, b) => b.points - a.points || a.name.localeCompare(b.name, "ru"));
-    ranked.forEach((item, i) => {
-      item.place = i + 1;
-      item.max_points = n * voteCount;
-    });
-    return { ranked, vote_count: voteCount, name: team.name, member_count: n };
+    const ranked = members
+      .map((name) => ({ name, votes: cnt[name], score: cnt[name] ? sum[name] / cnt[name] : null }))
+      .sort((a, b) => (b.score ?? -1) - (a.score ?? -1) || b.votes - a.votes || a.name.localeCompare(b.name));
+    ranked.forEach((item, i) => (item.place = i + 1));
+    return { ranked, vote_count: voteCount, name: team.name, member_count: members.length };
   }
 
   async function isAdmin() {
@@ -206,7 +210,7 @@
   }
 
   window.PollStore = {
-    load, loadVotes, hasVoted, votedIds, isAdmin, addVote, bordaScores, resetAll,
+    load, loadVotes, hasVoted, votedIds, isAdmin, addVote, pollScores, resetAll,
     exportJSON, importJSON, totalBallots, getDeviceId, ping,
     getMode: () => "api",
     cacheGet: () => ({ votes: localGet() }),
