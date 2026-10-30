@@ -24,8 +24,8 @@
 
   window.POLL_CONFIG = {
     ADMIN_SECRET: "rank2026admin",
-    TITLE: "Рейтинг команды",
-    SUBTITLE: "6 голосований, одни и те же люди. В каждом перетащите всех от лучшего (верх) к худшему (низ). Один голос на каждое голосование с устройства.",
+    TITLE: "Choose the BEST",
+    SUBTITLE: "",
     PEOPLE,
     TEAMS,
   };

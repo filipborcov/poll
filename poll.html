@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="robots" content="noindex">
-  <title>Team Ranking Poll</title>
+  <title>Choose the BEST</title>
   <style>
 :root {
   --bg: #0b1020;
@@ -454,8 +454,8 @@ table.summary tbody tr:hover { background: rgba(255,255,255,.03); }
 
   window.POLL_CONFIG = {
     ADMIN_SECRET: "rank2026admin",
-    TITLE: "Рейтинг команды",
-    SUBTITLE: "6 голосований, одни и те же люди. В каждом перетащите всех от лучшего (верх) к худшему (низ). Один голос на каждое голосование с устройства.",
+    TITLE: "Choose the BEST",
+    SUBTITLE: "",
     PEOPLE,
     TEAMS,
   };
@@ -525,7 +525,8 @@ table.summary tbody tr:hover { background: rgba(255,255,255,.03); }
 
   async function loadVotes() {
     try {
-      const { res, data } = await api("/api/votes?_=" + Date.now(), { cache: "no-store" });
+      const url = "/api/votes?device=" + encodeURIComponent(getDeviceId()) + "&_=" + Date.now();
+      const { res, data } = await api(url, { cache: "no-store" });
       if (res.ok && data && Array.isArray(data.votes)) {
         return data.votes.map(expand);
       }
@@ -626,6 +627,15 @@ table.summary tbody tr:hover { background: rgba(255,255,255,.03); }
     return { ranked, vote_count: voteCount, name: team.name, member_count: n };
   }
 
+  async function isAdmin() {
+    try {
+      const { res, data } = await api("/api/admin?_=" + Date.now(), { cache: "no-store" });
+      return !!(res.ok && data && data.ok);
+    } catch (_) {
+      return false;
+    }
+  }
+
   async function resetAll() {
     const key = window.POLL_CONFIG.ADMIN_SECRET;
     const { res, data } = await api("/api/reset", {
@@ -658,7 +668,7 @@ table.summary tbody tr:hover { background: rgba(255,255,255,.03); }
   }
 
   window.PollStore = {
-    load, loadVotes, hasVoted, votedIds, addVote, bordaScores, resetAll,
+    load, loadVotes, hasVoted, votedIds, isAdmin, addVote, bordaScores, resetAll,
     exportJSON, importJSON, totalBallots, getDeviceId, ping,
     getMode: () => "api",
     cacheGet: () => ({ votes: localGet() }),
@@ -850,15 +860,11 @@ table.summary tbody tr:hover { background: rgba(255,255,255,.03); }
       <div id="flash" class="flash-wrap"></div>
       <header class="hero">
         <h1>${cfg.TITLE}</h1>
-        <p class="subtitle">${cfg.SUBTITLE}</p>
+        ${cfg.SUBTITLE ? `<p class="subtitle">${cfg.SUBTITLE}</p>` : ""}
         <div style="margin-top:12px">${statusHtml}
           <span class="pill">Ваши голоса: ${doneCount} из ${entries.length}</span></div>
       </header>
-      <section class="teams">${teamsHtml}</section>
-      <footer class="foot">
-        <p>Один голос на каждое голосование с этого устройства. Расставьте всех от <strong>лучшего</strong> (верх) к худшему (низ).</p>
-        <a class="admin-link" href="#/admin?key=${encodeURIComponent(cfg.ADMIN_SECRET)}">Результаты (админ)</a>
-      </footer>`;
+      <section class="teams">${teamsHtml}</section>`;
   }
 
   async function renderVote(teamId) {
@@ -947,11 +953,11 @@ table.summary tbody tr:hover { background: rgba(255,255,255,.03); }
   }
 
   async function renderAdmin(key) {
-    if (key !== cfg.ADMIN_SECRET) {
+    if (key !== cfg.ADMIN_SECRET || !(await PollStore.isAdmin())) {
       root.innerHTML = `
         <div class="hero">
           <h1>403</h1>
-          <p class="subtitle">Неверный ключ. Откройте <code>/#/admin?key=…</code></p>
+          <p class="subtitle">Нет доступа.</p>
           <a class="back" href="#/">← На главную</a>
         </div>`;
       return;
@@ -1063,19 +1069,7 @@ table.summary tbody tr:hover { background: rgba(255,255,255,.03); }
       </div>
 
       ${summaryHtml}
-      <div class="admin-grid">${cardsParts.join("")}</div>
-      <div class="import-box">
-        <strong>Экспорт / импорт (резервная копия)</strong>
-        <textarea id="io-json" placeholder="JSON голосов…"></textarea>
-        <div class="row">
-          <button type="button" class="btn secondary" id="btn-export">Экспорт</button>
-          <button type="button" class="btn secondary" id="btn-import">Импорт (merge)</button>
-          <button type="button" class="btn danger" id="btn-reset">Скинуть голосование</button>
-        </div>
-      </div>
-      <footer class="foot">
-        <p>Админ-ссылка: <code>/#/admin?key=${cfg.ADMIN_SECRET}</code></p>
-      </footer>`;
+      <div class="admin-grid">${cardsParts.join("")}</div>`;
 
     async function doReset() {
       if (!confirm("СКИНУТЬ ВСЕ ГОЛОСА из общей базы? Это нельзя отменить.")) return;
@@ -1090,27 +1084,6 @@ table.summary tbody tr:hover { background: rgba(255,255,255,.03); }
     }
 
     document.getElementById("btn-reset-main").onclick = doReset;
-    document.getElementById("btn-reset").onclick = doReset;
-
-    document.getElementById("btn-export").onclick = async () => {
-      try {
-        const d = await PollStore.load();
-        document.getElementById("io-json").value = JSON.stringify(d, null, 2);
-        showFlash("Экспортировано.", "success");
-      } catch (e) {
-        showFlash(e.message, "error");
-      }
-    };
-    document.getElementById("btn-import").onclick = async () => {
-      try {
-        const n = await PollStore.importJSON(document.getElementById("io-json").value);
-        showFlash(`Добавлено новых голосов: ${n}`, "success");
-        await renderAdmin(key);
-        applyPendingFlash();
-      } catch (e) {
-        showFlash("Ошибка импорта: " + e.message, "error");
-      }
-    };
   }
 
   window.addEventListener("hashchange", () => {

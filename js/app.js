@@ -88,15 +88,11 @@
       <div id="flash" class="flash-wrap"></div>
       <header class="hero">
         <h1>${cfg.TITLE}</h1>
-        <p class="subtitle">${cfg.SUBTITLE}</p>
+        ${cfg.SUBTITLE ? `<p class="subtitle">${cfg.SUBTITLE}</p>` : ""}
         <div style="margin-top:12px">${statusHtml}
           <span class="pill">Ваши голоса: ${doneCount} из ${entries.length}</span></div>
       </header>
-      <section class="teams">${teamsHtml}</section>
-      <footer class="foot">
-        <p>Один голос на каждое голосование с этого устройства. Расставьте всех от <strong>лучшего</strong> (верх) к худшему (низ).</p>
-        <a class="admin-link" href="#/admin?key=${encodeURIComponent(cfg.ADMIN_SECRET)}">Результаты (админ)</a>
-      </footer>`;
+      <section class="teams">${teamsHtml}</section>`;
   }
 
   async function renderVote(teamId) {
@@ -185,11 +181,11 @@
   }
 
   async function renderAdmin(key) {
-    if (key !== cfg.ADMIN_SECRET) {
+    if (key !== cfg.ADMIN_SECRET || !(await PollStore.isAdmin())) {
       root.innerHTML = `
         <div class="hero">
           <h1>403</h1>
-          <p class="subtitle">Неверный ключ. Откройте <code>/#/admin?key=…</code></p>
+          <p class="subtitle">Нет доступа.</p>
           <a class="back" href="#/">← На главную</a>
         </div>`;
       return;
@@ -301,19 +297,7 @@
       </div>
 
       ${summaryHtml}
-      <div class="admin-grid">${cardsParts.join("")}</div>
-      <div class="import-box">
-        <strong>Экспорт / импорт (резервная копия)</strong>
-        <textarea id="io-json" placeholder="JSON голосов…"></textarea>
-        <div class="row">
-          <button type="button" class="btn secondary" id="btn-export">Экспорт</button>
-          <button type="button" class="btn secondary" id="btn-import">Импорт (merge)</button>
-          <button type="button" class="btn danger" id="btn-reset">Скинуть голосование</button>
-        </div>
-      </div>
-      <footer class="foot">
-        <p>Админ-ссылка: <code>/#/admin?key=${cfg.ADMIN_SECRET}</code></p>
-      </footer>`;
+      <div class="admin-grid">${cardsParts.join("")}</div>`;
 
     async function doReset() {
       if (!confirm("СКИНУТЬ ВСЕ ГОЛОСА из общей базы? Это нельзя отменить.")) return;
@@ -328,27 +312,6 @@
     }
 
     document.getElementById("btn-reset-main").onclick = doReset;
-    document.getElementById("btn-reset").onclick = doReset;
-
-    document.getElementById("btn-export").onclick = async () => {
-      try {
-        const d = await PollStore.load();
-        document.getElementById("io-json").value = JSON.stringify(d, null, 2);
-        showFlash("Экспортировано.", "success");
-      } catch (e) {
-        showFlash(e.message, "error");
-      }
-    };
-    document.getElementById("btn-import").onclick = async () => {
-      try {
-        const n = await PollStore.importJSON(document.getElementById("io-json").value);
-        showFlash(`Добавлено новых голосов: ${n}`, "success");
-        await renderAdmin(key);
-        applyPendingFlash();
-      } catch (e) {
-        showFlash("Ошибка импорта: " + e.message, "error");
-      }
-    };
   }
 
   window.addEventListener("hashchange", () => {

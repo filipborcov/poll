@@ -63,7 +63,8 @@
 
   async function loadVotes() {
     try {
-      const { res, data } = await api("/api/votes?_=" + Date.now(), { cache: "no-store" });
+      const url = "/api/votes?device=" + encodeURIComponent(getDeviceId()) + "&_=" + Date.now();
+      const { res, data } = await api(url, { cache: "no-store" });
       if (res.ok && data && Array.isArray(data.votes)) {
         return data.votes.map(expand);
       }
@@ -164,6 +165,15 @@
     return { ranked, vote_count: voteCount, name: team.name, member_count: n };
   }
 
+  async function isAdmin() {
+    try {
+      const { res, data } = await api("/api/admin?_=" + Date.now(), { cache: "no-store" });
+      return !!(res.ok && data && data.ok);
+    } catch (_) {
+      return false;
+    }
+  }
+
   async function resetAll() {
     const key = window.POLL_CONFIG.ADMIN_SECRET;
     const { res, data } = await api("/api/reset", {
@@ -196,7 +206,7 @@
   }
 
   window.PollStore = {
-    load, loadVotes, hasVoted, votedIds, addVote, bordaScores, resetAll,
+    load, loadVotes, hasVoted, votedIds, isAdmin, addVote, bordaScores, resetAll,
     exportJSON, importJSON, totalBallots, getDeviceId, ping,
     getMode: () => "api",
     cacheGet: () => ({ votes: localGet() }),

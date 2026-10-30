@@ -1,4 +1,5 @@
 const { cors, writeStore, empty } = require("./_db");
+const { isAdminIp } = require("./_admin");
 
 module.exports = async function handler(req, res) {
   cors(res);
@@ -7,7 +8,7 @@ module.exports = async function handler(req, res) {
   try {
     const body = typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
     const admin = process.env.POLL_ADMIN_SECRET || "rank2026admin";
-    if (body.key !== admin && req.headers["x-admin-key"] !== admin) {
+    if (!isAdminIp(req) || (body.key !== admin && req.headers["x-admin-key"] !== admin)) {
       return res.status(403).json({ error: "forbidden" });
     }
     const data = empty();
