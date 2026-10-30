@@ -393,3 +393,24 @@ body {
 @media (max-width: 640px) {
   .reset-box { flex-direction: column; align-items: stretch; }
 }
+
+/* Combined results table */
+.poll-desc { color: var(--text); opacity: .85; margin-bottom: .35rem; }
+.summary-card { margin-bottom: 1.25rem; }
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+table.summary { width: 100%; border-collapse: collapse; font-size: .9rem; }
+table.summary th, table.summary td {
+  padding: .5rem .55rem;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+table.summary th { color: var(--muted); font-weight: 600; font-size: .8rem; vertical-align: bottom; }
+table.summary th small { font-weight: 400; opacity: .8; }
+table.summary .l { text-align: left; }
+table.summary td.pl { color: var(--muted); }
+table.summary td.tot { font-weight: 700; color: var(--text); }
+table.summary tr.top1 td.pl { color: var(--gold); font-weight: 700; }
+table.summary tr.top2 td.pl { color: #cbd5e1; font-weight: 700; }
+table.summary tr.top3 td.pl { color: var(--bronze); font-weight: 700; }
+table.summary tbody tr:hover { background: rgba(255,255,255,.03); }

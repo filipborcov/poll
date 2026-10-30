@@ -93,7 +93,7 @@
     const device = getDeviceId();
     const votes = await loadVotes();
     if (votes.some((v) => v.device === device && v.team_id === teamId)) {
-      const e = new Error("Уже голосовали с этого устройства за эту команду");
+      const e = new Error("Уже голосовали с этого устройства в этом голосовании");
       e.code = "ALREADY";
       throw e;
     }
@@ -131,14 +131,23 @@
     return data;
   }
 
-  async function bordaScores(teamId) {
+  async function votedIds() {
+    const device = getDeviceId();
+    const ids = {};
+    for (const v of await loadVotes()) {
+      if (v.device === device) ids[v.team_id] = true;
+    }
+    return ids;
+  }
+
+  async function bordaScores(teamId, allVotes) {
     const team = (window.POLL_CONFIG.TEAMS || {})[teamId];
     if (!team) return { ranked: [], vote_count: 0, name: "", member_count: 0 };
     const members = team.members;
     const n = members.length;
     const scores = Object.fromEntries(members.map((m) => [m, 0]));
     let voteCount = 0;
-    for (const vote of await loadVotes()) {
+    for (const vote of allVotes || (await loadVotes())) {
       if (vote.team_id !== teamId) continue;
       voteCount++;
       (vote.ranking || []).forEach((name, pos) => {
@@ -166,8 +175,9 @@
     localClear();
   }
 
-  async function totalBallots() {
-    return (await loadVotes()).length;
+  async function totalBallots(allVotes) {
+    const teams = window.POLL_CONFIG.TEAMS || {};
+    return (allVotes || (await loadVotes())).filter((v) => v.team_id in teams).length;
   }
 
   function exportJSON() {
@@ -186,7 +196,7 @@
   }
 
   window.PollStore = {
-    load, loadVotes, hasVoted, addVote, bordaScores, resetAll,
+    load, loadVotes, hasVoted, votedIds, addVote, bordaScores, resetAll,
     exportJSON, importJSON, totalBallots, getDeviceId, ping,
     getMode: () => "api",
     cacheGet: () => ({ votes: localGet() }),

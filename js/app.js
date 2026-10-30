@@ -59,10 +59,8 @@
       : `<span class="pill danger">⚠ База недоступна — голоса могут не синхронизироваться</span>`;
 
     const entries = Object.entries(cfg.TEAMS);
-    const votedFlags = {};
-    for (const [tid] of entries) {
-      votedFlags[tid] = await PollStore.hasVoted(tid);
-    }
+    const votedFlags = await PollStore.votedIds();
+    const doneCount = entries.filter(([tid]) => votedFlags[tid]).length;
 
     const teamsHtml = entries
       .map(([tid, team], i) => {
@@ -73,7 +71,7 @@
           <div class="team-badge">${i + 1}</div>
           <div class="team-info">
             <h2>${team.name}</h2>
-            <p>${team.members.length} участников</p>
+            <p>${team.desc || team.members.length + " участников"}</p>
           </div>
           <div class="team-action">
             ${
@@ -91,11 +89,12 @@
       <header class="hero">
         <h1>${cfg.TITLE}</h1>
         <p class="subtitle">${cfg.SUBTITLE}</p>
-        <div style="margin-top:12px">${statusHtml}</div>
+        <div style="margin-top:12px">${statusHtml}
+          <span class="pill">Ваши голоса: ${doneCount} из ${entries.length}</span></div>
       </header>
       <section class="teams">${teamsHtml}</section>
       <footer class="foot">
-        <p>Один голос на команду с этого устройства. Расставьте всех от <strong>самого значимого</strong> (верх) к менее значимому (низ).</p>
+        <p>Один голос на каждое голосование с этого устройства. Расставьте всех от <strong>лучшего</strong> (верх) к худшему (низ).</p>
         <a class="admin-link" href="#/admin?key=${encodeURIComponent(cfg.ADMIN_SECRET)}">Результаты (админ)</a>
       </footer>`;
   }
@@ -107,12 +106,18 @@
       return;
     }
     if (await PollStore.hasVoted(teamId)) {
-      pushFlash("Вы уже проголосовали за эту команду.", "warning");
+      pushFlash("Вы уже проголосовали в этом голосовании.", "warning");
       location.hash = "#/";
       return;
     }
     document.title = team.name + " — " + cfg.TITLE;
-    const items = team.members
+    // Shuffle the starting order so nobody gets an edge from list position.
+    const order = team.members.slice();
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    const items = order
       .map(
         (m, i) => `
       <li class="rank-item" data-name="${encodeURIComponent(m)}" draggable="true">
@@ -128,16 +133,17 @@
       <header class="hero compact">
         <a class="back" href="#/">← Назад</a>
         <h1>${team.name}</h1>
-        <p class="subtitle">Перетащите карточки: <strong>1 место = самый значимый</strong>. Обязательно расставьте всех.</p>
+        ${team.desc ? `<p class="subtitle poll-desc">${team.desc}</p>` : ""}
+        <p class="subtitle">Перетащите карточки: <strong>1 место = лучший</strong>. Обязательно расставьте всех.</p>
       </header>
       <div class="voter-box">
         <label for="voter-name">Ваше имя <span class="muted">(необязательно)</span></label>
         <input id="voter-name" type="text" placeholder="Как вас записать в журнал голосов" maxlength="80" />
       </div>
       <div class="hint-bar">
-        <span>↑ Более значимый</span>
+        <span>↑ Лучше</span>
         <span>${team.members.length} / ${team.members.length}</span>
-        <span>Менее значимый ↓</span>
+        <span>Хуже ↓</span>
       </div>
       <ul id="sortable" class="rank-list" aria-label="Список для ранжирования">
         ${items}
@@ -191,11 +197,23 @@
     document.title = "Результаты — " + cfg.TITLE;
     root.innerHTML = `<p style="color:#94a3b8;text-align:center;padding:3rem">Загрузка результатов…</p>`;
 
-    const total = await PollStore.totalBallots();
+    const allVotes = await PollStore.loadVotes();
+    const total = await PollStore.totalBallots(allVotes);
     const ping = await PollStore.ping();
+    const pollIds = Object.keys(cfg.TEAMS);
+    const people = cfg.PEOPLE || cfg.TEAMS[pollIds[0]].members;
+    const n = people.length;
+    // Per poll: average Borda score per ballot (1..N), so polls with more voters don't weigh more.
+    const avg = {};
+    const counts = {};
+    people.forEach((p) => (avg[p] = {}));
     const cardsParts = [];
-    for (const tid of Object.keys(cfg.TEAMS)) {
-      const res = await PollStore.bordaScores(tid);
+    for (const tid of pollIds) {
+      const res = await PollStore.bordaScores(tid, allVotes);
+      counts[tid] = res.vote_count;
+      res.ranked.forEach((item) => {
+        if (avg[item.name]) avg[item.name][tid] = res.vote_count ? item.points / res.vote_count : null;
+      });
       const rows =
         res.vote_count === 0
           ? `<p class="empty">Пока нет голосов</p>`
@@ -223,6 +241,44 @@
         </section>`);
     }
 
+    const summary = people
+      .map((name) => {
+        const vals = pollIds.map((tid) => avg[name][tid]);
+        const total = vals.reduce((a, v) => a + (v || 0), 0);
+        return { name, vals, total };
+      })
+      .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+    const fmt = (v) => (v == null ? "—" : v.toFixed(1));
+    const maxTotal = n * pollIds.length;
+    const summaryHtml = `
+      <section class="result-card summary-card">
+        <div class="result-head">
+          <h2>🏆 Общий рейтинг</h2>
+          <span class="pill">средний балл, макс. ${n} за голосование</span>
+        </div>
+        <div class="table-wrap">
+          <table class="summary">
+            <thead><tr>
+              <th>#</th><th class="l">Человек</th>
+              ${pollIds.map((tid) => `<th title="${cfg.TEAMS[tid].desc || ""}">${cfg.TEAMS[tid].short || cfg.TEAMS[tid].name}<br><small>${pluralVotes(counts[tid])}</small></th>`).join("")}
+              <th>Итого<br><small>из ${maxTotal}</small></th>
+            </tr></thead>
+            <tbody>
+              ${summary
+                .map(
+                  (row, i) => `<tr class="${i < 3 ? "top top" + (i + 1) : ""}">
+                <td class="pl">${i + 1}</td>
+                <td class="l">${row.name}</td>
+                ${row.vals.map((v) => `<td>${fmt(v)}</td>`).join("")}
+                <td class="tot">${row.total.toFixed(1)}</td>
+              </tr>`
+                )
+                .join("")}
+            </tbody>
+          </table>
+        </div>
+      </section>`;
+
     root.innerHTML = `
       <div id="flash" class="flash-wrap"></div>
       <header class="hero">
@@ -244,6 +300,7 @@
         <button type="button" class="btn danger big" id="btn-reset-main">Скинуть голосование</button>
       </div>
 
+      ${summaryHtml}
       <div class="admin-grid">${cardsParts.join("")}</div>
       <div class="import-box">
         <strong>Экспорт / импорт (резервная копия)</strong>

@@ -402,34 +402,64 @@ body {
   .reset-box { flex-direction: column; align-items: stretch; }
 }
 
+/* Combined results table */
+.poll-desc { color: var(--text); opacity: .85; margin-bottom: .35rem; }
+.summary-card { margin-bottom: 1.25rem; }
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+table.summary { width: 100%; border-collapse: collapse; font-size: .9rem; }
+table.summary th, table.summary td {
+  padding: .5rem .55rem;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+table.summary th { color: var(--muted); font-weight: 600; font-size: .8rem; vertical-align: bottom; }
+table.summary th small { font-weight: 400; opacity: .8; }
+table.summary .l { text-align: left; }
+table.summary td.pl { color: var(--muted); }
+table.summary td.tot { font-weight: 700; color: var(--text); }
+table.summary tr.top1 td.pl { color: var(--gold); font-weight: 700; }
+table.summary tr.top2 td.pl { color: #cbd5e1; font-weight: 700; }
+table.summary tr.top3 td.pl { color: var(--bronze); font-weight: 700; }
+table.summary tbody tr:hover { background: rgba(255,255,255,.03); }
+
   </style>
 </head>
 <body>
   <div class="page"><div id="app"><p style="color:#94a3b8;text-align:center;padding:3rem">Loading…</p></div></div>
   <script>
-window.POLL_CONFIG = {
-  ADMIN_SECRET: "rank2026admin",
-  TITLE: "Рейтинг значимости участников",
-  SUBTITLE: "Расставьте участников от самого значимого (верх) к менее значимому (низ). Один голос на команду с устройства.",
-  TEAMS: {
-    team1: {
-      name: "Team: Accounting Software",
-      members: [
-        "Aistė","Irma","Daiva","Inga","Jurgita",
-        "Karolis","Sasha","Rajith","Anatolij","Nadil",
-        "Roman","Igor","Mikhail","Ilya","Laura"
-      ],
-    },
-    team2: {
-      name: "Team: Website Builder",
-      members: [
-        "Vasilisa","Anna","Milana","Tatjana","Viacheslav",
-        "Marius","German","Mike","Dmitrij","Aleksandr",
-        "Filip","Viktorija","Snezhana"
-      ],
-    },
-  },
-};
+(function () {
+  // One team, six polls. Every poll ranks the same people.
+  const PEOPLE = [
+    "Igor S.","Ilya S.","Inga L.","Irma R.","Jurgita B.",
+    "Karolis G.","Laura M.","Marius T.","Mike B.","Mikhail E.",
+    "Nadil K.","Rajith K.","Roman M.","Sasha","Aistė B.",
+    "Aleksandr S.","Anatoly N.","Anna E.","Dmitry S.","Filip B.",
+    "German N.","Snezhana V.","Viktorija Š."
+  ];
+
+  const POLLS = [
+    ["speed", "Speed at work", "Periodic updates, reaction to posts, fast answers to your questions, etc."],
+    ["comm", "Communication", "Nice, friendly, help as much as you ask, always ready for help."],
+    ["nobug", "No-bug guarantee", "Closing tasks and mostly none of them have obvious bugs."],
+    ["amount", "Amount of work", "Person produces a huge amount of work (huge big tasks, or a lot of small tasks)."],
+    ["punct", "Punctuality", "Person is always online during working hours and helps later on rare urgent requests."],
+    ["ai", "AI skills", "Person uses AI and agents in daily work."],
+  ];
+
+  const TEAMS = {};
+  for (const [id, name, desc] of POLLS) {
+    TEAMS[id] = { name, desc, short: name, members: PEOPLE };
+  }
+
+  window.POLL_CONFIG = {
+    ADMIN_SECRET: "rank2026admin",
+    TITLE: "Рейтинг команды",
+    SUBTITLE: "6 голосований, одни и те же люди. В каждом перетащите всех от лучшего (верх) к худшему (низ). Один голос на каждое голосование с устройства.",
+    PEOPLE,
+    TEAMS,
+  };
+})();
 (function () {
   const DEVICE_KEY = "team-rank-poll-device";
   const LOCAL_KEY = "team-rank-poll-local-votes";
@@ -525,7 +555,7 @@ window.POLL_CONFIG = {
     const device = getDeviceId();
     const votes = await loadVotes();
     if (votes.some((v) => v.device === device && v.team_id === teamId)) {
-      const e = new Error("Уже голосовали с этого устройства за эту команду");
+      const e = new Error("Уже голосовали с этого устройства в этом голосовании");
       e.code = "ALREADY";
       throw e;
     }
@@ -563,14 +593,23 @@ window.POLL_CONFIG = {
     return data;
   }
 
-  async function bordaScores(teamId) {
+  async function votedIds() {
+    const device = getDeviceId();
+    const ids = {};
+    for (const v of await loadVotes()) {
+      if (v.device === device) ids[v.team_id] = true;
+    }
+    return ids;
+  }
+
+  async function bordaScores(teamId, allVotes) {
     const team = (window.POLL_CONFIG.TEAMS || {})[teamId];
     if (!team) return { ranked: [], vote_count: 0, name: "", member_count: 0 };
     const members = team.members;
     const n = members.length;
     const scores = Object.fromEntries(members.map((m) => [m, 0]));
     let voteCount = 0;
-    for (const vote of await loadVotes()) {
+    for (const vote of allVotes || (await loadVotes())) {
       if (vote.team_id !== teamId) continue;
       voteCount++;
       (vote.ranking || []).forEach((name, pos) => {
@@ -598,8 +637,9 @@ window.POLL_CONFIG = {
     localClear();
   }
 
-  async function totalBallots() {
-    return (await loadVotes()).length;
+  async function totalBallots(allVotes) {
+    const teams = window.POLL_CONFIG.TEAMS || {};
+    return (allVotes || (await loadVotes())).filter((v) => v.team_id in teams).length;
   }
 
   function exportJSON() {
@@ -618,7 +658,7 @@ window.POLL_CONFIG = {
   }
 
   window.PollStore = {
-    load, loadVotes, hasVoted, addVote, bordaScores, resetAll,
+    load, loadVotes, hasVoted, votedIds, addVote, bordaScores, resetAll,
     exportJSON, importJSON, totalBallots, getDeviceId, ping,
     getMode: () => "api",
     cacheGet: () => ({ votes: localGet() }),
@@ -781,10 +821,8 @@ window.POLL_CONFIG = {
       : `<span class="pill danger">⚠ База недоступна — голоса могут не синхронизироваться</span>`;
 
     const entries = Object.entries(cfg.TEAMS);
-    const votedFlags = {};
-    for (const [tid] of entries) {
-      votedFlags[tid] = await PollStore.hasVoted(tid);
-    }
+    const votedFlags = await PollStore.votedIds();
+    const doneCount = entries.filter(([tid]) => votedFlags[tid]).length;
 
     const teamsHtml = entries
       .map(([tid, team], i) => {
@@ -795,7 +833,7 @@ window.POLL_CONFIG = {
           <div class="team-badge">${i + 1}</div>
           <div class="team-info">
             <h2>${team.name}</h2>
-            <p>${team.members.length} участников</p>
+            <p>${team.desc || team.members.length + " участников"}</p>
           </div>
           <div class="team-action">
             ${
@@ -813,11 +851,12 @@ window.POLL_CONFIG = {
       <header class="hero">
         <h1>${cfg.TITLE}</h1>
         <p class="subtitle">${cfg.SUBTITLE}</p>
-        <div style="margin-top:12px">${statusHtml}</div>
+        <div style="margin-top:12px">${statusHtml}
+          <span class="pill">Ваши голоса: ${doneCount} из ${entries.length}</span></div>
       </header>
       <section class="teams">${teamsHtml}</section>
       <footer class="foot">
-        <p>Один голос на команду с этого устройства. Расставьте всех от <strong>самого значимого</strong> (верх) к менее значимому (низ).</p>
+        <p>Один голос на каждое голосование с этого устройства. Расставьте всех от <strong>лучшего</strong> (верх) к худшему (низ).</p>
         <a class="admin-link" href="#/admin?key=${encodeURIComponent(cfg.ADMIN_SECRET)}">Результаты (админ)</a>
       </footer>`;
   }
@@ -829,12 +868,18 @@ window.POLL_CONFIG = {
       return;
     }
     if (await PollStore.hasVoted(teamId)) {
-      pushFlash("Вы уже проголосовали за эту команду.", "warning");
+      pushFlash("Вы уже проголосовали в этом голосовании.", "warning");
       location.hash = "#/";
       return;
     }
     document.title = team.name + " — " + cfg.TITLE;
-    const items = team.members
+    // Shuffle the starting order so nobody gets an edge from list position.
+    const order = team.members.slice();
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    const items = order
       .map(
         (m, i) => `
       <li class="rank-item" data-name="${encodeURIComponent(m)}" draggable="true">
@@ -850,16 +895,17 @@ window.POLL_CONFIG = {
       <header class="hero compact">
         <a class="back" href="#/">← Назад</a>
         <h1>${team.name}</h1>
-        <p class="subtitle">Перетащите карточки: <strong>1 место = самый значимый</strong>. Обязательно расставьте всех.</p>
+        ${team.desc ? `<p class="subtitle poll-desc">${team.desc}</p>` : ""}
+        <p class="subtitle">Перетащите карточки: <strong>1 место = лучший</strong>. Обязательно расставьте всех.</p>
       </header>
       <div class="voter-box">
         <label for="voter-name">Ваше имя <span class="muted">(необязательно)</span></label>
         <input id="voter-name" type="text" placeholder="Как вас записать в журнал голосов" maxlength="80" />
       </div>
       <div class="hint-bar">
-        <span>↑ Более значимый</span>
+        <span>↑ Лучше</span>
         <span>${team.members.length} / ${team.members.length}</span>
-        <span>Менее значимый ↓</span>
+        <span>Хуже ↓</span>
       </div>
       <ul id="sortable" class="rank-list" aria-label="Список для ранжирования">
         ${items}
@@ -913,11 +959,23 @@ window.POLL_CONFIG = {
     document.title = "Результаты — " + cfg.TITLE;
     root.innerHTML = `<p style="color:#94a3b8;text-align:center;padding:3rem">Загрузка результатов…</p>`;
 
-    const total = await PollStore.totalBallots();
+    const allVotes = await PollStore.loadVotes();
+    const total = await PollStore.totalBallots(allVotes);
     const ping = await PollStore.ping();
+    const pollIds = Object.keys(cfg.TEAMS);
+    const people = cfg.PEOPLE || cfg.TEAMS[pollIds[0]].members;
+    const n = people.length;
+    // Per poll: average Borda score per ballot (1..N), so polls with more voters don't weigh more.
+    const avg = {};
+    const counts = {};
+    people.forEach((p) => (avg[p] = {}));
     const cardsParts = [];
-    for (const tid of Object.keys(cfg.TEAMS)) {
-      const res = await PollStore.bordaScores(tid);
+    for (const tid of pollIds) {
+      const res = await PollStore.bordaScores(tid, allVotes);
+      counts[tid] = res.vote_count;
+      res.ranked.forEach((item) => {
+        if (avg[item.name]) avg[item.name][tid] = res.vote_count ? item.points / res.vote_count : null;
+      });
       const rows =
         res.vote_count === 0
           ? `<p class="empty">Пока нет голосов</p>`
@@ -945,6 +1003,44 @@ window.POLL_CONFIG = {
         </section>`);
     }
 
+    const summary = people
+      .map((name) => {
+        const vals = pollIds.map((tid) => avg[name][tid]);
+        const total = vals.reduce((a, v) => a + (v || 0), 0);
+        return { name, vals, total };
+      })
+      .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+    const fmt = (v) => (v == null ? "—" : v.toFixed(1));
+    const maxTotal = n * pollIds.length;
+    const summaryHtml = `
+      <section class="result-card summary-card">
+        <div class="result-head">
+          <h2>🏆 Общий рейтинг</h2>
+          <span class="pill">средний балл, макс. ${n} за голосование</span>
+        </div>
+        <div class="table-wrap">
+          <table class="summary">
+            <thead><tr>
+              <th>#</th><th class="l">Человек</th>
+              ${pollIds.map((tid) => `<th title="${cfg.TEAMS[tid].desc || ""}">${cfg.TEAMS[tid].short || cfg.TEAMS[tid].name}<br><small>${pluralVotes(counts[tid])}</small></th>`).join("")}
+              <th>Итого<br><small>из ${maxTotal}</small></th>
+            </tr></thead>
+            <tbody>
+              ${summary
+                .map(
+                  (row, i) => `<tr class="${i < 3 ? "top top" + (i + 1) : ""}">
+                <td class="pl">${i + 1}</td>
+                <td class="l">${row.name}</td>
+                ${row.vals.map((v) => `<td>${fmt(v)}</td>`).join("")}
+                <td class="tot">${row.total.toFixed(1)}</td>
+              </tr>`
+                )
+                .join("")}
+            </tbody>
+          </table>
+        </div>
+      </section>`;
+
     root.innerHTML = `
       <div id="flash" class="flash-wrap"></div>
       <header class="hero">
@@ -966,6 +1062,7 @@ window.POLL_CONFIG = {
         <button type="button" class="btn danger big" id="btn-reset-main">Скинуть голосование</button>
       </div>
 
+      ${summaryHtml}
       <div class="admin-grid">${cardsParts.join("")}</div>
       <div class="import-box">
         <strong>Экспорт / импорт (резервная копия)</strong>
