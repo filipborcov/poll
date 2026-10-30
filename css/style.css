@@ -125,7 +125,7 @@ body {
   display: flex;
   align-items: center;
   gap: .75rem;
-  padding: .85rem 1rem;
+  padding: .55rem 1rem;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 12px;

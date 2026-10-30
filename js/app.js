@@ -77,7 +77,7 @@
             ${
               done
                 ? '<span class="pill success">✓ Голос учтён</span>'
-                : '<span class="pill">Ранжировать →</span>'
+                : '<span class="pill">Lets Vote →</span>'
             }
           </div>
         </a>`;
@@ -132,10 +132,6 @@
         ${team.desc ? `<p class="subtitle poll-desc">${team.desc}</p>` : ""}
         <p class="subtitle">Перетащите карточки: <strong>1 место = лучший</strong>. Обязательно расставьте всех.</p>
       </header>
-      <div class="voter-box">
-        <label for="voter-name">Ваше имя <span class="muted">(необязательно)</span></label>
-        <input id="voter-name" type="text" placeholder="Как вас записать в журнал голосов" maxlength="80" />
-      </div>
       <div class="hint-bar">
         <span>↑ Лучше</span>
         <span>${team.members.length} / ${team.members.length}</span>
@@ -158,7 +154,7 @@
         showFlash("Нужно расставить ВСЕХ участников.", "error");
         return;
       }
-      const voterName = (document.getElementById("voter-name").value || "").trim();
+      const voterName = "";
       btn.disabled = true;
       btn.textContent = "Сохраняем…";
       try {
