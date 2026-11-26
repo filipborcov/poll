@@ -2,6 +2,17 @@
   const cfg = window.POLL_CONFIG;
   const root = document.getElementById("app");
   const t = I18N.t;
+
+  // Avatar: photo from cfg.AVATARS if set, otherwise initials on a brand colour picked from the name.
+  const AVATAR_COLORS = ["#EB1E2A", "#F26518", "#2196F3", "#489335", "#5833A4", "#D24B69", "#F68C14", "#7A4CD6", "#85001D", "#61B9FF"];
+  function avatar(name) {
+    const src = (cfg.AVATARS || {})[name];
+    if (src) return `<img class="avatar" src="${src}" alt="" draggable="false">`;
+    const initials = name.replace(/[^\p{L}\s]/gu, " ").trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
+    let h = 0;
+    for (const ch of name) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+    return `<span class="avatar" style="background:${AVATAR_COLORS[h % AVATAR_COLORS.length]}">${initials}</span>`;
+  }
   let currentBoard = null; // { teamId, api } while the voting board is shown
 
   function takeFlash() {
@@ -80,7 +91,7 @@
 
   async function renderIndex() {
     document.title = cfg.TITLE;
-    root.innerHTML = `<p style="color:#94a3b8;text-align:center;padding:3rem">${t("loading")}</p>`;
+    root.innerHTML = `<p style="color:#595959;text-align:center;padding:3rem">${t("loading")}</p>`;
 
     const ping = await PollStore.ping();
     const statusHtml = ping.ok
@@ -144,7 +155,7 @@
     }
     const cards = order
       .map(
-        (m) => `<div class="board-card" data-name="${encodeURIComponent(m)}"><span class="card-name">${m}</span><span class="card-score"></span></div>`
+        (m) => `<div class="board-card" data-name="${encodeURIComponent(m)}">${avatar(m)}<span class="card-name">${m}</span><span class="card-score"></span></div>`
       )
       .join("");
 
@@ -209,7 +220,7 @@
       return;
     }
     document.title = t("resultsTitle") + " — " + cfg.TITLE;
-    root.innerHTML = `<p style="color:#94a3b8;text-align:center;padding:3rem">${t("loadingResults")}</p>`;
+    root.innerHTML = `<p style="color:#595959;text-align:center;padding:3rem">${t("loadingResults")}</p>`;
 
     const allVotes = await PollStore.loadVotes();
     const total = await PollStore.totalBallots(allVotes);
@@ -240,7 +251,7 @@
                 const top = item.place <= 3 && item.score != null ? "top" : "";
                 return `<li class="result-row ${top}">
                   <span class="r-place">${item.place}</span>
-                  <span class="r-name">${item.name}</span>
+                  <span class="r-name">${avatar(item.name)}${item.name}</span>
                   <span class="r-pts"><strong>${fmt(item.score)}</strong> <small>· ${I18N.votes(item.votes)}</small></span>
                   <div class="r-bar-wrap"><div class="r-bar" style="width:${item.score || 0}%"></div></div>
                 </li>`;
@@ -285,7 +296,7 @@
                 .map(
                   (row, i) => `<tr class="${i < 3 && row.total != null ? "top top" + (i + 1) : ""}">
                 <td class="pl">${i + 1}</td>
-                <td class="l">${row.name}</td>
+                <td class="l"><span class="who">${avatar(row.name)}${row.name}</span></td>
                 ${row.vals.map((v) => `<td>${fmt(v)}</td>`).join("")}
                 <td class="tot">${fmt(row.total)}</td>
                 <td class="vc">${row.votes}</td>
