@@ -110,12 +110,12 @@
     const device = getDeviceId();
     const votes = await loadVotes();
     if (votes.some((v) => v.device === device && v.team_id === teamId)) {
-      const e = new Error("Уже голосовали с этого устройства в этом голосовании");
+      const e = new Error("You have already voted in this poll from this device");
       e.code = "ALREADY";
       throw e;
     }
     const r = compact(teamId, scored);
-    if (!r) throw new Error("Пустой бюллетень: поставьте на поле хотя бы одного человека");
+    if (!r) throw new Error("Empty ballot: place at least one person on the board");
 
     const { res, data } = await api("/api/vote", {
       method: "POST",
@@ -129,12 +129,12 @@
     });
 
     if (res.status === 409) {
-      const e = new Error((data && data.message) || "Уже голосовали");
+      const e = new Error((data && data.message) || "Already voted");
       e.code = "ALREADY";
       throw e;
     }
     if (!res.ok) {
-      throw new Error((data && data.error) || "Не удалось сохранить (" + res.status + ")");
+      throw new Error((data && data.error) || "Could not save (" + res.status + ")");
     }
 
     localAdd({
@@ -213,7 +213,7 @@
       headers: { "Content-Type": "application/json", "X-Admin-Key": key },
       body: JSON.stringify({ key }),
     });
-    if (!res.ok) throw new Error((data && data.error) || "Сброс не удался");
+    if (!res.ok) throw new Error((data && data.error) || "Reset failed");
     localClear();
   }
 
