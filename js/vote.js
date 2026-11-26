@@ -1,96 +1,147 @@
 (function () {
-  function initSortable(list) {
-    if (!list) return;
-    let dragEl = null;
+  // Free-placement board: three zones stacked vertically.
+  //   top zone    -> score 100 (top edge) .. 50 (bottom edge)
+  //   "no idea"   -> not rated
+  //   bottom zone -> score 50 (top edge) .. 0 (bottom edge)
+  // Horizontal position means nothing; it only lets people spread cards out.
+  // Works with mouse and touch through Pointer Events.
 
-    function renumber() {
-      list.querySelectorAll(".rank-item").forEach((li, i) => {
-        const place = li.querySelector(".place");
-        if (place) place.textContent = String(i + 1);
-      });
-    }
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 
-    list.querySelectorAll(".rank-item").forEach((item) => {
-      item.addEventListener("dragstart", (e) => {
-        dragEl = item;
-        item.classList.add("dragging");
-        e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData("text/plain", decodeURIComponent(item.getAttribute("data-name") || ""));
-      });
-      item.addEventListener("dragend", () => {
-        item.classList.remove("dragging");
-        list.querySelectorAll(".rank-item").forEach((el) => el.classList.remove("drag-over"));
-        dragEl = null;
-        renumber();
-      });
-      item.addEventListener("dragover", (e) => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
-        const target = e.currentTarget;
-        if (!dragEl || target === dragEl || !list.contains(target)) return;
-        target.classList.add("drag-over");
-        const rect = target.getBoundingClientRect();
-        const mid = rect.top + rect.height / 2;
-        if (e.clientY < mid) list.insertBefore(dragEl, target);
-        else list.insertBefore(dragEl, target.nextSibling);
-        renumber();
-      });
-      item.addEventListener("dragleave", (e) => {
-        e.currentTarget.classList.remove("drag-over");
-      });
-      item.addEventListener("drop", (e) => {
-        e.preventDefault();
-        e.currentTarget.classList.remove("drag-over");
-        renumber();
-      });
-    });
-
-    let touchItem = null;
-    list.querySelectorAll(".rank-item").forEach((item) => {
-      item.addEventListener(
-        "touchstart",
-        () => {
-          touchItem = item;
-          item.classList.add("dragging");
-        },
-        { passive: true }
-      );
-    });
-    list.addEventListener(
-      "touchmove",
-      (e) => {
-        if (!touchItem) return;
-        e.preventDefault();
-        const touch = e.touches[0];
-        const el = document.elementFromPoint(touch.clientX, touch.clientY);
-        const target = el && el.closest(".rank-item");
-        if (target && target !== touchItem && list.contains(target)) {
-          const rect = target.getBoundingClientRect();
-          const mid = rect.top + rect.height / 2;
-          if (touch.clientY < mid) list.insertBefore(touchItem, target);
-          else list.insertBefore(touchItem, target.nextSibling);
-          renumber();
-        }
-      },
-      { passive: false }
-    );
-    list.addEventListener(
-      "touchend",
-      () => {
-        if (touchItem) {
-          touchItem.classList.remove("dragging");
-          touchItem = null;
-          renumber();
-        }
-      },
-      { passive: true }
-    );
+  function scoreFor(zone, fracY) {
+    // fracY: card centre within the zone, 0 = top edge, 1 = bottom edge.
+    if (zone === "top") return Math.round(100 - 50 * fracY);
+    if (zone === "bottom") return Math.round(50 - 50 * fracY);
+    return null;
   }
 
-  window.initSortable = initSortable;
-  window.getRanking = function (list) {
-    return Array.from(list.querySelectorAll(".rank-item")).map((li) =>
-      decodeURIComponent(li.getAttribute("data-name") || "")
-    );
-  };
+  function initBoard(board, onChange) {
+    const zones = {
+      top: board.querySelector('[data-zone="top"]'),
+      none: board.querySelector('[data-zone="none"]'),
+      bottom: board.querySelector('[data-zone="bottom"]'),
+    };
+    let drag = null;
+    let scrollRaf = 0;
+    let lastPointer = null;
+
+    function cardScore(card) {
+      const zone = card.parentElement && card.parentElement.getAttribute("data-zone");
+      if (zone !== "top" && zone !== "bottom") return null;
+      const fy = parseFloat(card.dataset.fy || "0.5");
+      return scoreFor(zone, fy);
+    }
+
+    function paint(card) {
+      const s = cardScore(card);
+      const badge = card.querySelector(".card-score");
+      if (badge) badge.textContent = s == null ? "" : String(s);
+      card.classList.toggle("placed", s != null);
+    }
+
+    function zoneAt(clientY) {
+      for (const key of ["top", "none", "bottom"]) {
+        const r = zones[key].getBoundingClientRect();
+        if (clientY >= r.top && clientY <= r.bottom) return key;
+      }
+      const topR = zones.top.getBoundingClientRect();
+      return clientY < topR.top ? "top" : "bottom";
+    }
+
+    function placeIn(card, zone, clientX, clientY) {
+      const z = zones[zone];
+      if (zone === "none") {
+        card.style.left = card.style.top = "";
+        delete card.dataset.fx;
+        delete card.dataset.fy;
+        z.appendChild(card);
+      } else {
+        z.appendChild(card);
+        const r = z.getBoundingClientRect();
+        const w = card.offsetWidth, h = card.offsetHeight;
+        // Keep the whole card inside the zone; store the centre as fractions.
+        const cx = clamp(clientX - r.left, w / 2, r.width - w / 2);
+        const cy = clamp(clientY - r.top, h / 2, r.height - h / 2);
+        const fx = r.width > w ? (cx - w / 2) / (r.width - w) : 0;
+        const fy = r.height > h ? (cy - h / 2) / (r.height - h) : 0.5;
+        card.dataset.fx = fx.toFixed(4);
+        card.dataset.fy = fy.toFixed(4);
+        card.style.left = `calc(${(fx * 100).toFixed(2)}% - ${(fx * w).toFixed(1)}px)`;
+        card.style.top = `calc(${(fy * 100).toFixed(2)}% - ${(fy * h).toFixed(1)}px)`;
+      }
+      paint(card);
+    }
+
+    function autoScroll() {
+      scrollRaf = 0;
+      if (!drag || !lastPointer) return;
+      const edge = 70, y = lastPointer.y, vh = window.innerHeight;
+      let dy = 0;
+      if (y < edge) dy = -Math.ceil((edge - y) / 5);
+      else if (y > vh - edge) dy = Math.ceil((y - (vh - edge)) / 5);
+      if (dy) {
+        window.scrollBy(0, dy);
+        scrollRaf = requestAnimationFrame(autoScroll);
+      }
+    }
+
+    function onDown(e) {
+      const card = e.target.closest(".board-card");
+      if (!card || !board.contains(card) || (e.button != null && e.button !== 0)) return;
+      e.preventDefault();
+      const r = card.getBoundingClientRect();
+      drag = { card, dx: e.clientX - (r.left + r.width / 2), dy: e.clientY - (r.top + r.height / 2), id: e.pointerId };
+      card.setPointerCapture && card.setPointerCapture(e.pointerId);
+      card.classList.add("dragging");
+      card.style.width = r.width + "px";
+      card.style.position = "fixed";
+      card.style.left = r.left + "px";
+      card.style.top = r.top + "px";
+      lastPointer = { x: e.clientX, y: e.clientY };
+    }
+
+    function onMove(e) {
+      if (!drag || e.pointerId !== drag.id) return;
+      e.preventDefault();
+      const c = drag.card;
+      c.style.left = e.clientX - drag.dx - c.offsetWidth / 2 + "px";
+      c.style.top = e.clientY - drag.dy - c.offsetHeight / 2 + "px";
+      lastPointer = { x: e.clientX, y: e.clientY };
+      const z = zoneAt(e.clientY - drag.dy);
+      for (const k in zones) zones[k].classList.toggle("drop-target", k === z);
+      if (!scrollRaf) scrollRaf = requestAnimationFrame(autoScroll);
+    }
+
+    function onUp(e) {
+      if (!drag || e.pointerId !== drag.id) return;
+      const c = drag.card;
+      const cx = e.clientX - drag.dx, cy = e.clientY - drag.dy;
+      c.classList.remove("dragging");
+      c.style.position = c.style.width = "";
+      for (const k in zones) zones[k].classList.remove("drop-target");
+      placeIn(c, zoneAt(cy), cx, cy);
+      drag = null;
+      if (onChange) onChange();
+    }
+
+    board.addEventListener("pointerdown", onDown);
+    board.addEventListener("pointermove", onMove);
+    board.addEventListener("pointerup", onUp);
+    board.addEventListener("pointercancel", onUp);
+    board.querySelectorAll(".board-card").forEach(paint);
+
+    return {
+      // [{name, score}] for every card placed outside "no idea".
+      scores() {
+        return Array.from(board.querySelectorAll(".board-card"))
+          .map((c) => ({ name: decodeURIComponent(c.getAttribute("data-name") || ""), score: cardScore(c) }))
+          .filter((x) => x.score != null);
+      },
+      placeIn,
+      zones,
+    };
+  }
+
+  window.initBoard = initBoard;
+  window.boardScoreFor = scoreFor;
 })();
