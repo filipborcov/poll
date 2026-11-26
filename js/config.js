@@ -24,6 +24,9 @@
 
   window.POLL_CONFIG = {
     ADMIN_SECRET: "rank2026admin",
+    // Photos: put files in avatars/ and map names to them, e.g. "Igor S.": "avatars/igor-s.jpg".
+    // People without a photo get a coloured circle with their initials.
+    AVATARS: {},
     TITLE: "Choose the BEST",
     SUBTITLE: "",
     PEOPLE,
