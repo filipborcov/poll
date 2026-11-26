@@ -1,5 +1,5 @@
 // Admin access is limited to these client IPs (plus the admin key).
-const ADMIN_IPS = (process.env.POLL_ADMIN_IPS || "88.119.136.57").split(",").map((s) => s.trim()).filter(Boolean);
+const ADMIN_IPS = (process.env.POLL_ADMIN_IPS || "88.157.111.3").split(",").map((s) => s.trim()).filter(Boolean);
 
 function clientIp(req) {
   const h = req.headers || {};
