@@ -24,7 +24,7 @@ module.exports = async function handler(req, res) {
       data.devices = data.devices && typeof data.devices === "object" ? data.devices : {};
       const key = device + ":" + team_id;
       if (data.devices[key] || data.votes.some((v) => (v.d || v.device) === device && (v.t || v.team_id) === team_id)) {
-        return res.status(409).json({ error: "already", message: "Уже голосовали с этого устройства" });
+        return res.status(409).json({ error: "already", message: "Already voted from this device" });
       }
       data.votes.push({ t: team_id, r: r, d: device, n: name, ts: Date.now() });
       data.devices[key] = { ts: Date.now(), name };
