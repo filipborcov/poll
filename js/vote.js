@@ -137,6 +137,27 @@
           .map((c) => ({ name: decodeURIComponent(c.getAttribute("data-name") || ""), score: cardScore(c) }))
           .filter((x) => x.score != null);
       },
+      // Board state, to keep placements when the page is re-rendered (e.g. language switch).
+      snapshot() {
+        return Array.from(board.querySelectorAll(".board-card"))
+          .filter((c) => c.dataset.fy != null)
+          .map((c) => ({ name: c.getAttribute("data-name"), zone: c.parentElement.getAttribute("data-zone"), fx: +c.dataset.fx, fy: +c.dataset.fy }));
+      },
+      restore(list) {
+        for (const it of list || []) {
+          const card = Array.from(board.querySelectorAll(".board-card")).find((c) => c.getAttribute("data-name") === it.name);
+          const z = zones[it.zone];
+          if (!card || !z || it.zone === "none") continue;
+          z.appendChild(card);
+          const w = card.offsetWidth, h = card.offsetHeight;
+          card.dataset.fx = String(it.fx);
+          card.dataset.fy = String(it.fy);
+          card.style.left = `calc(${(it.fx * 100).toFixed(2)}% - ${(it.fx * w).toFixed(1)}px)`;
+          card.style.top = `calc(${(it.fy * 100).toFixed(2)}% - ${(it.fy * h).toFixed(1)}px)`;
+          paint(card);
+        }
+        if (onChange) onChange();
+      },
       placeIn,
       zones,
     };

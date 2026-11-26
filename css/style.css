@@ -477,3 +477,16 @@ table.summary td.vc { color: var(--muted); }
 .card-score:empty { display: none; }
 .sticky-actions { align-items: center; gap: 10px; }
 .sticky-actions .pill { flex: none; }
+
+/* Language switcher */
+.lang-switch {
+  display: flex; justify-content: flex-end; gap: 4px;
+  max-width: 920px; margin: 0 auto; padding: 10px 1rem 0;
+}
+.lang-switch button {
+  background: transparent; color: var(--muted);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 4px 9px; font-size: .78rem; font-weight: 700; cursor: pointer;
+}
+.lang-switch button:hover { color: var(--text); border-color: var(--primary2); }
+.lang-switch button.active { background: var(--primary); border-color: var(--primary); color: #fff; }

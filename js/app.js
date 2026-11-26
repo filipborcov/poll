@@ -1,6 +1,8 @@
 (function () {
   const cfg = window.POLL_CONFIG;
   const root = document.getElementById("app");
+  const t = I18N.t;
+  let currentBoard = null; // { teamId, api } while the voting board is shown
 
   function takeFlash() {
     try {
@@ -33,7 +35,34 @@
     if (f) showFlash(f.msg, f.cat);
   }
 
+  let pendingRestore = null;
+
+  // Language switcher, fixed at the top of the page. Switching keeps board placements.
+  function renderLangSwitch() {
+    let bar = document.getElementById("lang-switch");
+    if (!bar) {
+      bar = document.createElement("div");
+      bar.id = "lang-switch";
+      bar.className = "lang-switch";
+      document.body.insertBefore(bar, document.body.firstChild);
+      bar.addEventListener("click", (e) => {
+        const b = e.target.closest("button[data-lang]");
+        if (!b) return;
+        const snap = currentBoard && document.getElementById("board") ? { teamId: currentBoard.teamId, cards: currentBoard.api.snapshot() } : null;
+        if (!I18N.setLang(b.getAttribute("data-lang"))) return;
+        pendingRestore = snap;
+        renderLangSwitch();
+        route();
+      });
+    }
+    bar.innerHTML = I18N.LANGS.map(
+      ([code, label, full]) =>
+        `<button type="button" data-lang="${code}" title="${full}" class="${code === I18N.getLang() ? "active" : ""}">${label}</button>`
+    ).join("");
+  }
+
   async function route() {
+    currentBoard = null;
     const hash = location.hash.slice(1) || "/";
     const [path, qs] = hash.split("?");
     const params = new URLSearchParams(qs || "");
@@ -44,19 +73,19 @@
       else await renderIndex();
       applyPendingFlash();
     } catch (e) {
-      root.innerHTML = `<div class="hero"><h1>Error</h1><p class="subtitle">${e.message}</p>
-        <a class="back" href="#/">← Home</a></div>`;
+      root.innerHTML = `<div class="hero"><h1>${t("error")}</h1><p class="subtitle">${e.message}</p>
+        <a class="back" href="#/">${t("home")}</a></div>`;
     }
   }
 
   async function renderIndex() {
     document.title = cfg.TITLE;
-    root.innerHTML = `<p style="color:#94a3b8;text-align:center;padding:3rem">Loading…</p>`;
+    root.innerHTML = `<p style="color:#94a3b8;text-align:center;padding:3rem">${t("loading")}</p>`;
 
     const ping = await PollStore.ping();
     const statusHtml = ping.ok
-      ? `<span class="pill success">☁ Database online, votes: ${ping.count || 0}</span>`
-      : `<span class="pill danger">⚠ Database unavailable, votes may not sync</span>`;
+      ? `<span class="pill success">${t("dbOnline", { n: ping.count || 0 })}</span>`
+      : `<span class="pill danger">${t("dbDown")}</span>`;
 
     const entries = Object.entries(cfg.TEAMS);
     const votedFlags = await PollStore.votedIds();
@@ -71,13 +100,13 @@
           <div class="team-badge">${i + 1}</div>
           <div class="team-info">
             <h2>${team.name}</h2>
-            <p>${team.desc || team.members.length + " people"}</p>
+            <p>${team.desc || t("people", { n: team.members.length })}</p>
           </div>
           <div class="team-action">
             ${
               done
-                ? '<span class="pill success">✓ Voted</span>'
-                : '<span class="pill">Let’s vote →</span>'
+                ? `<span class="pill success">${t("voted")}</span>`
+                : `<span class="pill">${t("letsVote")}</span>`
             }
           </div>
         </a>`;
@@ -90,7 +119,7 @@
         <h1>${cfg.TITLE}</h1>
         ${cfg.SUBTITLE ? `<p class="subtitle">${cfg.SUBTITLE}</p>` : ""}
         <div style="margin-top:12px">${statusHtml}
-          <span class="pill">Your votes: ${doneCount} of ${entries.length}</span></div>
+          <span class="pill">${t("yourVotes", { a: doneCount, b: entries.length })}</span></div>
       </header>
       <section class="teams">${teamsHtml}</section>`;
   }
@@ -102,7 +131,7 @@
       return;
     }
     if (await PollStore.hasVoted(teamId)) {
-      pushFlash("You have already voted in this poll.", "warning");
+      pushFlash(t("alreadyVoted"), "warning");
       location.hash = "#/";
       return;
     }
@@ -122,65 +151,65 @@
     root.innerHTML = `
       <div id="flash" class="flash-wrap"></div>
       <header class="hero compact">
-        <a class="back" href="#/">← Back</a>
+        <a class="back" href="#/">${t("back")}</a>
         <h1>${team.name}</h1>
         ${team.desc ? `<p class="subtitle poll-desc">${team.desc}</p>` : ""}
-        <p class="subtitle">Drag people onto the board: <strong>the higher, the better</strong>. Leave anyone you don't know in the middle, in “No idea”. Horizontal position doesn't matter.</p>
+        <p class="subtitle">${t("boardHint")}</p>
       </header>
       <div class="board" id="board">
         <div class="zone zone-top" data-zone="top"><span class="zone-label">▲ MAX · 100</span></div>
-        <div class="zone zone-none" data-zone="none"><span class="zone-label">No idea / don't work with them</span>${cards}</div>
+        <div class="zone zone-none" data-zone="none"><span class="zone-label">${t("noIdea")}</span>${cards}</div>
         <div class="zone zone-bottom" data-zone="bottom"><span class="zone-label zone-label-bottom">▼ MIN · 0</span></div>
       </div>
       <div class="actions sticky-actions">
-        <span class="pill" id="rank-count">Rated: 0 of ${team.members.length}</span>
-        <button type="button" class="btn primary" id="submit-btn">Submit</button>
+        <span class="pill" id="rank-count">${t("rated", { a: 0, b: team.members.length })}</span>
+        <button type="button" class="btn primary" id="submit-btn">${t("submit")}</button>
       </div>`;
 
     const boardApi = initBoard(document.getElementById("board"), () => {
-      document.getElementById("rank-count").textContent = `Rated: ${boardApi.scores().length} of ${team.members.length}`;
+      document.getElementById("rank-count").textContent = t("rated", { a: boardApi.scores().length, b: team.members.length });
     });
+
+    if (pendingRestore && pendingRestore.teamId === teamId) boardApi.restore(pendingRestore.cards);
+    pendingRestore = null;
+    currentBoard = { teamId, api: boardApi };
 
     const btn = document.getElementById("submit-btn");
     btn.addEventListener("click", async () => {
       const scored = boardApi.scores();
       const expected = new Set(team.members);
       if (!scored.length || scored.some((x) => !expected.has(x.name))) {
-        showFlash("Place at least one person on the board (above or below “No idea”).", "error");
+        showFlash(t("needOne"), "error");
         return;
       }
       btn.disabled = true;
-      btn.textContent = "Saving…";
+      btn.textContent = t("saving");
       try {
         await PollStore.addVote(teamId, scored, "");
-        pushFlash(`Thanks! Your vote for “${team.name}” is saved.`, "success");
+        pushFlash(t("thanks", { name: team.name }), "success");
         location.hash = "#/";
       } catch (e) {
         btn.disabled = false;
-        btn.textContent = "Submit";
-        showFlash(e.message || "Could not save", "error");
+        btn.textContent = t("submit");
+        showFlash(e.message || t("saveFailed"), "error");
       }
     });
   }
 
-  function pluralVotes(n) {
-    if (n === 0) return "no votes";
-    if (n === 1) return "1 vote";
-        return n + " votes";
-  }
+  const pluralVotes = (n) => I18N.votes(n);
 
   async function renderAdmin(key) {
     if (key !== cfg.ADMIN_SECRET || !(await PollStore.isAdmin())) {
       root.innerHTML = `
         <div class="hero">
           <h1>403</h1>
-          <p class="subtitle">Access denied.</p>
-          <a class="back" href="#/">← Home</a>
+          <p class="subtitle">${t("accessDenied")}</p>
+          <a class="back" href="#/">${t("home")}</a>
         </div>`;
       return;
     }
-    document.title = "Results — " + cfg.TITLE;
-    root.innerHTML = `<p style="color:#94a3b8;text-align:center;padding:3rem">Loading results…</p>`;
+    document.title = t("resultsTitle") + " — " + cfg.TITLE;
+    root.innerHTML = `<p style="color:#94a3b8;text-align:center;padding:3rem">${t("loadingResults")}</p>`;
 
     const allVotes = await PollStore.loadVotes();
     const total = await PollStore.totalBallots(allVotes);
@@ -204,7 +233,7 @@
       });
       const rows =
         res.vote_count === 0
-          ? `<p class="empty">No votes yet</p>`
+          ? `<p class="empty">${t("noVotesYet")}</p>`
           : `<ol class="results-list">
             ${res.ranked
               .map((item) => {
@@ -212,7 +241,7 @@
                 return `<li class="result-row ${top}">
                   <span class="r-place">${item.place}</span>
                   <span class="r-name">${item.name}</span>
-                  <span class="r-pts"><strong>${fmt(item.score)}</strong> <small>· ${item.votes} votes</small></span>
+                  <span class="r-pts"><strong>${fmt(item.score)}</strong> <small>· ${I18N.votes(item.votes)}</small></span>
                   <div class="r-bar-wrap"><div class="r-bar" style="width:${item.score || 0}%"></div></div>
                 </li>`;
               })
@@ -240,16 +269,16 @@
     const summaryHtml = `
       <section class="result-card summary-card">
         <div class="result-head">
-          <h2>🏆 Overall ranking</h2>
-          <span class="pill">0–100: top of board = 100, bottom = 0</span>
+          <h2>${t("overall")}</h2>
+          <span class="pill">${t("scale")}</span>
         </div>
         <div class="table-wrap">
           <table class="summary">
             <thead><tr>
-              <th>#</th><th class="l">Person</th>
+              <th>#</th><th class="l">${t("person")}</th>
               ${pollIds.map((tid) => `<th title="${cfg.TEAMS[tid].desc || ""}">${cfg.TEAMS[tid].short || cfg.TEAMS[tid].name}<br><small>${pluralVotes(counts[tid])}</small></th>`).join("")}
-              <th>Total<br><small>average</small></th>
-              <th>Votes<br><small>rated by</small></th>
+              <th>${t("total")}<br><small>${t("average")}</small></th>
+              <th>${t("votesCol")}<br><small>${t("ratedBy")}</small></th>
             </tr></thead>
             <tbody>
               ${summary
@@ -271,42 +300,43 @@
     root.innerHTML = `
       <div id="flash" class="flash-wrap"></div>
       <header class="hero">
-        <a class="back" href="#/">← Home</a>
-        <h1>📊 Results</h1>
-        <p class="subtitle">Ballots: <strong>${total}</strong> · score = height on the board: top = 100, bottom = 0 (older list ballots: 1st place = 100, last = 0); “No idea” is not counted</p>
+        <a class="back" href="#/">${t("home")}</a>
+        <h1>${t("results")}</h1>
+        <p class="subtitle">${t("ballotsLine", { n: total })}</p>
         <p class="subtitle">${
           ping.ok
-            ? "☁ Database online, ballots: " + (ping.count || 0)
-            : "⚠ Database unavailable: " + (ping.error || "")
+            ? t("dbOnlineBallots", { n: ping.count || 0 })
+            : t("dbDownErr", { e: ping.error || "" })
         }</p>
       </header>
 
       <div class="reset-box">
         <div>
-          <strong>Reset the poll</strong>
-          <p class="muted">Deletes ALL votes from the shared database. This cannot be undone.</p>
+          <strong>${t("resetTitle")}</strong>
+          <p class="muted">${t("resetDesc")}</p>
         </div>
-        <button type="button" class="btn danger big" id="btn-reset-main">Reset the poll</button>
+        <button type="button" class="btn danger big" id="btn-reset-main">${t("resetBtn")}</button>
       </div>
 
       ${summaryHtml}
       <div class="admin-grid">${cardsParts.join("")}</div>`;
 
     async function doReset() {
-      if (!confirm("DELETE ALL VOTES from the shared database? This cannot be undone.")) return;
+      if (!confirm(t("resetConfirm"))) return;
       try {
         await PollStore.resetAll();
-        pushFlash("Poll reset. All votes deleted.", "success");
+        pushFlash(t("resetDone"), "success");
         await renderAdmin(key);
         applyPendingFlash();
       } catch (e) {
-        showFlash("Reset failed: " + e.message, "error");
+        showFlash(t("resetFailed") + ": " + e.message, "error");
       }
     }
 
     document.getElementById("btn-reset-main").onclick = doReset;
   }
 
+  renderLangSwitch();
   window.addEventListener("hashchange", () => {
     route();
   });
