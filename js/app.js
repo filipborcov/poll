@@ -107,21 +107,15 @@
       return;
     }
     document.title = team.name + " — " + cfg.TITLE;
-    // Shuffle the starting order so nobody gets an edge from list position.
+    // Shuffle the starting order so nobody gets an edge from position in the "no idea" tray.
     const order = team.members.slice();
     for (let i = order.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [order[i], order[j]] = [order[j], order[i]];
     }
-    const items = order
+    const cards = order
       .map(
-        (m, i) => `
-      <li class="rank-item" data-name="${encodeURIComponent(m)}" draggable="true">
-        <span class="handle" title="Перетащить">⠿</span>
-        <span class="place">${i + 1}</span>
-        <span class="name">${m}</span>
-        <button type="button" class="skip-btn" title="Не знаю / не работаю с этим человеком">Не знаю</button>
-      </li>`
+        (m) => `<div class="board-card" data-name="${encodeURIComponent(m)}"><span class="card-name">${m}</span><span class="card-score"></span></div>`
       )
       .join("");
 
@@ -131,72 +125,39 @@
         <a class="back" href="#/">← Назад</a>
         <h1>${team.name}</h1>
         ${team.desc ? `<p class="subtitle poll-desc">${team.desc}</p>` : ""}
-        <p class="subtitle">Перетащите карточки: <strong>1 место = лучший</strong>. Если не знаете человека или не работаете с ним, нажмите «Не знаю».</p>
+        <p class="subtitle">Перетащите людей на поле: <strong>чем выше, тем лучше</strong>. Кого не знаете, оставьте в середине, в «Не знаю». По горизонтали ставьте как удобно, это не влияет.</p>
       </header>
-      <div class="hint-bar">
-        <span>↑ Лучше</span>
-        <span id="rank-count">${team.members.length} / ${team.members.length}</span>
-        <span>Хуже ↓</span>
-      </div>
-      <ul id="sortable" class="rank-list" aria-label="Список для ранжирования">
-        ${items}
-      </ul>
-      <div id="skipped-wrap" class="skipped-wrap hidden">
-        <div class="skipped-title">Не знаю / не работаю с ними — в этом голосовании не оцениваются</div>
-        <ul id="skipped" class="rank-list skipped-list"></ul>
+      <div class="board" id="board">
+        <div class="zone zone-top" data-zone="top"><span class="zone-label">▲ MAX · 100</span></div>
+        <div class="zone zone-none" data-zone="none"><span class="zone-label">Не знаю / не работаю с ними</span>${cards}</div>
+        <div class="zone zone-bottom" data-zone="bottom"><span class="zone-label zone-label-bottom">▼ MIN · 0</span></div>
       </div>
       <div class="actions sticky-actions">
-        <button type="button" class="btn primary" id="submit-btn">Отправить рейтинг</button>
+        <span class="pill" id="rank-count">Оценено: 0 из ${team.members.length}</span>
+        <button type="button" class="btn primary" id="submit-btn">Отправить</button>
       </div>`;
 
-    const list = document.getElementById("sortable");
-    const skipped = document.getElementById("skipped");
-    const skippedWrap = document.getElementById("skipped-wrap");
-    initSortable(list);
-
-    function refresh() {
-      list.querySelectorAll(".rank-item").forEach((li, i) => (li.querySelector(".place").textContent = String(i + 1)));
-      const n = list.querySelectorAll(".rank-item").length;
-      document.getElementById("rank-count").textContent = `${n} / ${team.members.length}`;
-      skippedWrap.classList.toggle("hidden", !skipped.children.length);
-    }
-
-    // "Don't know" moves a person out of the ranking; "Вернуть" puts them back at the bottom.
-    root.addEventListener("click", (e) => {
-      const b = e.target.closest(".skip-btn");
-      if (!b) return;
-      const li = b.closest(".rank-item");
-      if (list.contains(li)) {
-        li.draggable = false;
-        li.classList.add("is-skipped");
-        b.textContent = "Вернуть";
-        skipped.appendChild(li);
-      } else {
-        li.draggable = true;
-        li.classList.remove("is-skipped");
-        b.textContent = "Не знаю";
-        list.appendChild(li);
-      }
-      refresh();
+    const boardApi = initBoard(document.getElementById("board"), () => {
+      document.getElementById("rank-count").textContent = `Оценено: ${boardApi.scores().length} из ${team.members.length}`;
     });
+
     const btn = document.getElementById("submit-btn");
     btn.addEventListener("click", async () => {
-      const ranking = getRanking(list);
+      const scored = boardApi.scores();
       const expected = new Set(team.members);
-      if (!ranking.length || new Set(ranking).size !== ranking.length || ranking.some((n) => !expected.has(n))) {
-        showFlash("Оставьте в списке хотя бы одного человека.", "error");
+      if (!scored.length || scored.some((x) => !expected.has(x.name))) {
+        showFlash("Поставьте на поле хотя бы одного человека (выше или ниже «Не знаю»).", "error");
         return;
       }
-      const voterName = "";
       btn.disabled = true;
       btn.textContent = "Сохраняем…";
       try {
-        await PollStore.addVote(teamId, ranking, voterName);
+        await PollStore.addVote(teamId, scored, "");
         pushFlash(`Спасибо! Голос за «${team.name}» сохранён в общую базу.`, "success");
         location.hash = "#/";
       } catch (e) {
         btn.disabled = false;
-        btn.textContent = "Отправить рейтинг";
+        btn.textContent = "Отправить";
         showFlash(e.message || "Ошибка сохранения", "error");
       }
     });
@@ -281,7 +242,7 @@
       <section class="result-card summary-card">
         <div class="result-head">
           <h2>🏆 Общий рейтинг</h2>
-          <span class="pill">0–100: 1 место = 100, последнее = 0</span>
+          <span class="pill">0–100: верх поля = 100, низ = 0</span>
         </div>
         <div class="table-wrap">
           <table class="summary">
@@ -313,7 +274,7 @@
       <header class="hero">
         <a class="back" href="#/">← На главную</a>
         <h1>📊 Результаты</h1>
-        <p class="subtitle">Всего бюллетеней: <strong>${total}</strong> · балл = место в процентах: 1-е = 100, последнее = 0; «Не знаю» не учитывается</p>
+        <p class="subtitle">Всего бюллетеней: <strong>${total}</strong> · балл = высота на поле: верх = 100, низ = 0 (старые бюллетени-списки: 1-е место = 100, последнее = 0); «Не знаю» не учитывается</p>
         <p class="subtitle">${
           ping.ok
             ? "☁ База онлайн, бюллетеней: " + (ping.count || 0)

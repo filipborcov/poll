@@ -445,6 +445,47 @@ table.summary th { white-space: normal; min-width: 4.5rem; }
 table.summary th.l { min-width: 0; }
 table.summary td.vc { color: var(--muted); }
 
+/* Free-placement board: higher = better, middle band = "no idea" */
+.board {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin-bottom: 5.5rem;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.zone { position: relative; padding: 8px; }
+.zone-top, .zone-bottom { height: max(320px, 42vh); }
+.zone-top { background: linear-gradient(to bottom, rgba(34,197,94,.16), rgba(34,197,94,.02)); }
+.zone-bottom { background: linear-gradient(to bottom, rgba(239,68,68,.02), rgba(239,68,68,.16)); }
+.zone-none {
+  display: flex; flex-wrap: wrap; align-content: flex-start; gap: 6px;
+  min-height: 90px; padding-top: 30px;
+  background: var(--bg2);
+  border-top: 2px dashed var(--border); border-bottom: 2px dashed var(--border);
+}
+.zone.drop-target { outline: 2px solid var(--primary2); outline-offset: -2px; }
+.zone-label {
+  position: absolute; left: 10px; top: 8px;
+  font-size: .75rem; font-weight: 700; letter-spacing: .04em; color: var(--muted);
+  pointer-events: none;
+}
+.zone-label-bottom { top: auto; bottom: 8px; }
+.board-card {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 10px; border-radius: 10px;
+  background: var(--card); border: 1px solid var(--border);
+  font-size: .85rem; white-space: nowrap;
+  cursor: grab; touch-action: none;
+}
+.zone-top .board-card, .zone-bottom .board-card { position: absolute; }
+.board-card.placed { border-color: var(--primary); }
+.board-card.dragging { position: fixed; z-index: 1000; cursor: grabbing; box-shadow: var(--shadow); opacity: .95; }
+.card-score { font-size: .7rem; font-weight: 700; color: var(--primary2); }
+.card-score:empty { display: none; }
+.sticky-actions { align-items: center; gap: 10px; }
+.sticky-actions .pill { flex: none; }
+
   </style>
 </head>
 <body>
@@ -509,19 +550,33 @@ table.summary td.vc { color: var(--muted); }
     try { localStorage.removeItem(LOCAL_KEY); } catch (_) {}
   }
 
-  function compact(teamId, ranking) {
+  // Ballot encoding in the shared store (field "r"):
+  //   board ballots: "v2:" + "memberIndex=score" pairs, e.g. "v2:3=87,14=12" (score 0..100)
+  //   old list ballots: "memberIndex,memberIndex,..." best first (score = place percentile)
+  function compact(teamId, scored) {
     const members = ((window.POLL_CONFIG.TEAMS || {})[teamId] || {}).members || [];
-    return ranking
-      .map((name) => members.indexOf(name))
-      .filter((i) => i >= 0)
-      .join(",");
+    const parts = scored
+      .map((x) => [members.indexOf(x.name), Math.round(Math.max(0, Math.min(100, x.score)))])
+      .filter(([i]) => i >= 0)
+      .map(([i, sc]) => i + "=" + sc);
+    return parts.length ? "v2:" + parts.join(",") : "";
   }
 
   function expand(row) {
     const teamId = row.t || row.team_id;
     const members = ((window.POLL_CONFIG.TEAMS || {})[teamId] || {}).members || [];
     let ranking = row.ranking;
-    if (typeof row.r === "string" && row.r.length) {
+    let scores = null;
+    if (typeof row.r === "string" && row.r.startsWith("v2:")) {
+      scores = {};
+      for (const pair of row.r.slice(3).split(",")) {
+        const [i, sc] = pair.split("=");
+        const name = members[parseInt(i, 10)];
+        const v = Number(sc);
+        if (name && Number.isFinite(v)) scores[name] = Math.max(0, Math.min(100, v));
+      }
+      ranking = Object.keys(scores).sort((a, b) => scores[b] - scores[a]);
+    } else if (typeof row.r === "string" && row.r.length) {
       if (row._fmt === "names" || row.r.indexOf("||") !== -1) {
         ranking = row.r.split("||").filter(Boolean);
       } else {
@@ -532,6 +587,7 @@ table.summary td.vc { color: var(--muted); }
       _id: row._id,
       team_id: teamId,
       ranking: ranking || [],
+      scores,
       device: row.d || row.device || "",
       name: row.n || row.name || "",
       ts: row.ts || 0,
@@ -574,7 +630,8 @@ table.summary td.vc { color: var(--muted); }
     return votes.some((v) => v.device === device && v.team_id === teamId);
   }
 
-  async function addVote(teamId, ranking, voterName) {
+  // scored: [{name, score}] from the board.
+  async function addVote(teamId, scored, voterName) {
     const device = getDeviceId();
     const votes = await loadVotes();
     if (votes.some((v) => v.device === device && v.team_id === teamId)) {
@@ -582,8 +639,8 @@ table.summary td.vc { color: var(--muted); }
       e.code = "ALREADY";
       throw e;
     }
-    const r = compact(teamId, ranking);
-    if (!r) throw new Error("Пустой рейтинг — расставьте всех участников");
+    const r = compact(teamId, scored);
+    if (!r) throw new Error("Пустой бюллетень: поставьте на поле хотя бы одного человека");
 
     const { res, data } = await api("/api/vote", {
       method: "POST",
@@ -591,7 +648,6 @@ table.summary td.vc { color: var(--muted); }
       body: JSON.stringify({
         team_id: teamId,
         r: r,
-        ranking: ranking,
         device: device,
         name: voterName || "",
       }),
@@ -608,7 +664,8 @@ table.summary td.vc { color: var(--muted); }
 
     localAdd({
       team_id: teamId,
-      ranking: ranking,
+      r: r,
+      ranking: scored.map((x) => x.name),
       device: device,
       name: voterName || "",
       ts: Date.now(),
@@ -625,9 +682,11 @@ table.summary td.vc { color: var(--muted); }
     return ids;
   }
 
-  // Score of one ballot for a person = their place as a percentile of that ballot:
-  // 1st = 100, last = 0, a one-person ballot = 100. People a voter skipped ("don't know")
-  // simply aren't on that ballot, so a person's poll score averages only the ballots that ranked them.
+  // Score of one ballot for a person, 0..100:
+  //   board ballots carry the score directly (height on the board: top = 100, bottom = 0);
+  //   old list ballots use the place as a percentile: 1st = 100, last = 0, a one-person ballot = 100.
+  // People a voter left in "no idea" aren't on that ballot, so a person's poll score
+  // averages only the ballots that rated them.
   async function pollScores(teamId, allVotes) {
     const team = (window.POLL_CONFIG.TEAMS || {})[teamId];
     if (!team) return { ranked: [], vote_count: 0, name: "", member_count: 0 };
@@ -637,6 +696,16 @@ table.summary td.vc { color: var(--muted); }
     let voteCount = 0;
     for (const vote of allVotes || (await loadVotes())) {
       if (vote.team_id !== teamId) continue;
+      if (vote.scores) {
+        const names = Object.keys(vote.scores).filter((name) => name in sum);
+        if (!names.length) continue;
+        voteCount++;
+        names.forEach((name) => {
+          sum[name] += vote.scores[name];
+          cnt[name] += 1;
+        });
+        continue;
+      }
       const ranking = (vote.ranking || []).filter((name) => name in sum);
       if (!ranking.length) continue;
       voteCount++;
@@ -701,100 +770,151 @@ table.summary td.vc { color: var(--muted); }
   };
 })();
 (function () {
-  function initSortable(list) {
-    if (!list) return;
-    let dragEl = null;
+  // Free-placement board: three zones stacked vertically.
+  //   top zone    -> score 100 (top edge) .. 50 (bottom edge)
+  //   "no idea"   -> not rated
+  //   bottom zone -> score 50 (top edge) .. 0 (bottom edge)
+  // Horizontal position means nothing; it only lets people spread cards out.
+  // Works with mouse and touch through Pointer Events.
 
-    function renumber() {
-      list.querySelectorAll(".rank-item").forEach((li, i) => {
-        const place = li.querySelector(".place");
-        if (place) place.textContent = String(i + 1);
-      });
-    }
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
 
-    list.querySelectorAll(".rank-item").forEach((item) => {
-      item.addEventListener("dragstart", (e) => {
-        dragEl = item;
-        item.classList.add("dragging");
-        e.dataTransfer.effectAllowed = "move";
-        e.dataTransfer.setData("text/plain", decodeURIComponent(item.getAttribute("data-name") || ""));
-      });
-      item.addEventListener("dragend", () => {
-        item.classList.remove("dragging");
-        list.querySelectorAll(".rank-item").forEach((el) => el.classList.remove("drag-over"));
-        dragEl = null;
-        renumber();
-      });
-      item.addEventListener("dragover", (e) => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
-        const target = e.currentTarget;
-        if (!dragEl || target === dragEl || !list.contains(target)) return;
-        target.classList.add("drag-over");
-        const rect = target.getBoundingClientRect();
-        const mid = rect.top + rect.height / 2;
-        if (e.clientY < mid) list.insertBefore(dragEl, target);
-        else list.insertBefore(dragEl, target.nextSibling);
-        renumber();
-      });
-      item.addEventListener("dragleave", (e) => {
-        e.currentTarget.classList.remove("drag-over");
-      });
-      item.addEventListener("drop", (e) => {
-        e.preventDefault();
-        e.currentTarget.classList.remove("drag-over");
-        renumber();
-      });
-    });
-
-    let touchItem = null;
-    list.querySelectorAll(".rank-item").forEach((item) => {
-      item.addEventListener(
-        "touchstart",
-        () => {
-          touchItem = item;
-          item.classList.add("dragging");
-        },
-        { passive: true }
-      );
-    });
-    list.addEventListener(
-      "touchmove",
-      (e) => {
-        if (!touchItem) return;
-        e.preventDefault();
-        const touch = e.touches[0];
-        const el = document.elementFromPoint(touch.clientX, touch.clientY);
-        const target = el && el.closest(".rank-item");
-        if (target && target !== touchItem && list.contains(target)) {
-          const rect = target.getBoundingClientRect();
-          const mid = rect.top + rect.height / 2;
-          if (touch.clientY < mid) list.insertBefore(touchItem, target);
-          else list.insertBefore(touchItem, target.nextSibling);
-          renumber();
-        }
-      },
-      { passive: false }
-    );
-    list.addEventListener(
-      "touchend",
-      () => {
-        if (touchItem) {
-          touchItem.classList.remove("dragging");
-          touchItem = null;
-          renumber();
-        }
-      },
-      { passive: true }
-    );
+  function scoreFor(zone, fracY) {
+    // fracY: card centre within the zone, 0 = top edge, 1 = bottom edge.
+    if (zone === "top") return Math.round(100 - 50 * fracY);
+    if (zone === "bottom") return Math.round(50 - 50 * fracY);
+    return null;
   }
 
-  window.initSortable = initSortable;
-  window.getRanking = function (list) {
-    return Array.from(list.querySelectorAll(".rank-item")).map((li) =>
-      decodeURIComponent(li.getAttribute("data-name") || "")
-    );
-  };
+  function initBoard(board, onChange) {
+    const zones = {
+      top: board.querySelector('[data-zone="top"]'),
+      none: board.querySelector('[data-zone="none"]'),
+      bottom: board.querySelector('[data-zone="bottom"]'),
+    };
+    let drag = null;
+    let scrollRaf = 0;
+    let lastPointer = null;
+
+    function cardScore(card) {
+      const zone = card.parentElement && card.parentElement.getAttribute("data-zone");
+      if (zone !== "top" && zone !== "bottom") return null;
+      const fy = parseFloat(card.dataset.fy || "0.5");
+      return scoreFor(zone, fy);
+    }
+
+    function paint(card) {
+      const s = cardScore(card);
+      const badge = card.querySelector(".card-score");
+      if (badge) badge.textContent = s == null ? "" : String(s);
+      card.classList.toggle("placed", s != null);
+    }
+
+    function zoneAt(clientY) {
+      for (const key of ["top", "none", "bottom"]) {
+        const r = zones[key].getBoundingClientRect();
+        if (clientY >= r.top && clientY <= r.bottom) return key;
+      }
+      const topR = zones.top.getBoundingClientRect();
+      return clientY < topR.top ? "top" : "bottom";
+    }
+
+    function placeIn(card, zone, clientX, clientY) {
+      const z = zones[zone];
+      if (zone === "none") {
+        card.style.left = card.style.top = "";
+        delete card.dataset.fx;
+        delete card.dataset.fy;
+        z.appendChild(card);
+      } else {
+        z.appendChild(card);
+        const r = z.getBoundingClientRect();
+        const w = card.offsetWidth, h = card.offsetHeight;
+        // Keep the whole card inside the zone; store the centre as fractions.
+        const cx = clamp(clientX - r.left, w / 2, r.width - w / 2);
+        const cy = clamp(clientY - r.top, h / 2, r.height - h / 2);
+        const fx = r.width > w ? (cx - w / 2) / (r.width - w) : 0;
+        const fy = r.height > h ? (cy - h / 2) / (r.height - h) : 0.5;
+        card.dataset.fx = fx.toFixed(4);
+        card.dataset.fy = fy.toFixed(4);
+        card.style.left = `calc(${(fx * 100).toFixed(2)}% - ${(fx * w).toFixed(1)}px)`;
+        card.style.top = `calc(${(fy * 100).toFixed(2)}% - ${(fy * h).toFixed(1)}px)`;
+      }
+      paint(card);
+    }
+
+    function autoScroll() {
+      scrollRaf = 0;
+      if (!drag || !lastPointer) return;
+      const edge = 70, y = lastPointer.y, vh = window.innerHeight;
+      let dy = 0;
+      if (y < edge) dy = -Math.ceil((edge - y) / 5);
+      else if (y > vh - edge) dy = Math.ceil((y - (vh - edge)) / 5);
+      if (dy) {
+        window.scrollBy(0, dy);
+        scrollRaf = requestAnimationFrame(autoScroll);
+      }
+    }
+
+    function onDown(e) {
+      const card = e.target.closest(".board-card");
+      if (!card || !board.contains(card) || (e.button != null && e.button !== 0)) return;
+      e.preventDefault();
+      const r = card.getBoundingClientRect();
+      drag = { card, dx: e.clientX - (r.left + r.width / 2), dy: e.clientY - (r.top + r.height / 2), id: e.pointerId };
+      card.setPointerCapture && card.setPointerCapture(e.pointerId);
+      card.classList.add("dragging");
+      card.style.width = r.width + "px";
+      card.style.position = "fixed";
+      card.style.left = r.left + "px";
+      card.style.top = r.top + "px";
+      lastPointer = { x: e.clientX, y: e.clientY };
+    }
+
+    function onMove(e) {
+      if (!drag || e.pointerId !== drag.id) return;
+      e.preventDefault();
+      const c = drag.card;
+      c.style.left = e.clientX - drag.dx - c.offsetWidth / 2 + "px";
+      c.style.top = e.clientY - drag.dy - c.offsetHeight / 2 + "px";
+      lastPointer = { x: e.clientX, y: e.clientY };
+      const z = zoneAt(e.clientY - drag.dy);
+      for (const k in zones) zones[k].classList.toggle("drop-target", k === z);
+      if (!scrollRaf) scrollRaf = requestAnimationFrame(autoScroll);
+    }
+
+    function onUp(e) {
+      if (!drag || e.pointerId !== drag.id) return;
+      const c = drag.card;
+      const cx = e.clientX - drag.dx, cy = e.clientY - drag.dy;
+      c.classList.remove("dragging");
+      c.style.position = c.style.width = "";
+      for (const k in zones) zones[k].classList.remove("drop-target");
+      placeIn(c, zoneAt(cy), cx, cy);
+      drag = null;
+      if (onChange) onChange();
+    }
+
+    board.addEventListener("pointerdown", onDown);
+    board.addEventListener("pointermove", onMove);
+    board.addEventListener("pointerup", onUp);
+    board.addEventListener("pointercancel", onUp);
+    board.querySelectorAll(".board-card").forEach(paint);
+
+    return {
+      // [{name, score}] for every card placed outside "no idea".
+      scores() {
+        return Array.from(board.querySelectorAll(".board-card"))
+          .map((c) => ({ name: decodeURIComponent(c.getAttribute("data-name") || ""), score: cardScore(c) }))
+          .filter((x) => x.score != null);
+      },
+      placeIn,
+      zones,
+    };
+  }
+
+  window.initBoard = initBoard;
+  window.boardScoreFor = scoreFor;
 })();
 (function () {
   const cfg = window.POLL_CONFIG;
@@ -905,21 +1025,15 @@ table.summary td.vc { color: var(--muted); }
       return;
     }
     document.title = team.name + " — " + cfg.TITLE;
-    // Shuffle the starting order so nobody gets an edge from list position.
+    // Shuffle the starting order so nobody gets an edge from position in the "no idea" tray.
     const order = team.members.slice();
     for (let i = order.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [order[i], order[j]] = [order[j], order[i]];
     }
-    const items = order
+    const cards = order
       .map(
-        (m, i) => `
-      <li class="rank-item" data-name="${encodeURIComponent(m)}" draggable="true">
-        <span class="handle" title="Перетащить">⠿</span>
-        <span class="place">${i + 1}</span>
-        <span class="name">${m}</span>
-        <button type="button" class="skip-btn" title="Не знаю / не работаю с этим человеком">Не знаю</button>
-      </li>`
+        (m) => `<div class="board-card" data-name="${encodeURIComponent(m)}"><span class="card-name">${m}</span><span class="card-score"></span></div>`
       )
       .join("");
 
@@ -929,72 +1043,39 @@ table.summary td.vc { color: var(--muted); }
         <a class="back" href="#/">← Назад</a>
         <h1>${team.name}</h1>
         ${team.desc ? `<p class="subtitle poll-desc">${team.desc}</p>` : ""}
-        <p class="subtitle">Перетащите карточки: <strong>1 место = лучший</strong>. Если не знаете человека или не работаете с ним, нажмите «Не знаю».</p>
+        <p class="subtitle">Перетащите людей на поле: <strong>чем выше, тем лучше</strong>. Кого не знаете, оставьте в середине, в «Не знаю». По горизонтали ставьте как удобно, это не влияет.</p>
       </header>
-      <div class="hint-bar">
-        <span>↑ Лучше</span>
-        <span id="rank-count">${team.members.length} / ${team.members.length}</span>
-        <span>Хуже ↓</span>
-      </div>
-      <ul id="sortable" class="rank-list" aria-label="Список для ранжирования">
-        ${items}
-      </ul>
-      <div id="skipped-wrap" class="skipped-wrap hidden">
-        <div class="skipped-title">Не знаю / не работаю с ними — в этом голосовании не оцениваются</div>
-        <ul id="skipped" class="rank-list skipped-list"></ul>
+      <div class="board" id="board">
+        <div class="zone zone-top" data-zone="top"><span class="zone-label">▲ MAX · 100</span></div>
+        <div class="zone zone-none" data-zone="none"><span class="zone-label">Не знаю / не работаю с ними</span>${cards}</div>
+        <div class="zone zone-bottom" data-zone="bottom"><span class="zone-label zone-label-bottom">▼ MIN · 0</span></div>
       </div>
       <div class="actions sticky-actions">
-        <button type="button" class="btn primary" id="submit-btn">Отправить рейтинг</button>
+        <span class="pill" id="rank-count">Оценено: 0 из ${team.members.length}</span>
+        <button type="button" class="btn primary" id="submit-btn">Отправить</button>
       </div>`;
 
-    const list = document.getElementById("sortable");
-    const skipped = document.getElementById("skipped");
-    const skippedWrap = document.getElementById("skipped-wrap");
-    initSortable(list);
-
-    function refresh() {
-      list.querySelectorAll(".rank-item").forEach((li, i) => (li.querySelector(".place").textContent = String(i + 1)));
-      const n = list.querySelectorAll(".rank-item").length;
-      document.getElementById("rank-count").textContent = `${n} / ${team.members.length}`;
-      skippedWrap.classList.toggle("hidden", !skipped.children.length);
-    }
-
-    // "Don't know" moves a person out of the ranking; "Вернуть" puts them back at the bottom.
-    root.addEventListener("click", (e) => {
-      const b = e.target.closest(".skip-btn");
-      if (!b) return;
-      const li = b.closest(".rank-item");
-      if (list.contains(li)) {
-        li.draggable = false;
-        li.classList.add("is-skipped");
-        b.textContent = "Вернуть";
-        skipped.appendChild(li);
-      } else {
-        li.draggable = true;
-        li.classList.remove("is-skipped");
-        b.textContent = "Не знаю";
-        list.appendChild(li);
-      }
-      refresh();
+    const boardApi = initBoard(document.getElementById("board"), () => {
+      document.getElementById("rank-count").textContent = `Оценено: ${boardApi.scores().length} из ${team.members.length}`;
     });
+
     const btn = document.getElementById("submit-btn");
     btn.addEventListener("click", async () => {
-      const ranking = getRanking(list);
+      const scored = boardApi.scores();
       const expected = new Set(team.members);
-      if (!ranking.length || new Set(ranking).size !== ranking.length || ranking.some((n) => !expected.has(n))) {
-        showFlash("Оставьте в списке хотя бы одного человека.", "error");
+      if (!scored.length || scored.some((x) => !expected.has(x.name))) {
+        showFlash("Поставьте на поле хотя бы одного человека (выше или ниже «Не знаю»).", "error");
         return;
       }
-      const voterName = "";
       btn.disabled = true;
       btn.textContent = "Сохраняем…";
       try {
-        await PollStore.addVote(teamId, ranking, voterName);
+        await PollStore.addVote(teamId, scored, "");
         pushFlash(`Спасибо! Голос за «${team.name}» сохранён в общую базу.`, "success");
         location.hash = "#/";
       } catch (e) {
         btn.disabled = false;
-        btn.textContent = "Отправить рейтинг";
+        btn.textContent = "Отправить";
         showFlash(e.message || "Ошибка сохранения", "error");
       }
     });
@@ -1079,7 +1160,7 @@ table.summary td.vc { color: var(--muted); }
       <section class="result-card summary-card">
         <div class="result-head">
           <h2>🏆 Общий рейтинг</h2>
-          <span class="pill">0–100: 1 место = 100, последнее = 0</span>
+          <span class="pill">0–100: верх поля = 100, низ = 0</span>
         </div>
         <div class="table-wrap">
           <table class="summary">
@@ -1111,7 +1192,7 @@ table.summary td.vc { color: var(--muted); }
       <header class="hero">
         <a class="back" href="#/">← На главную</a>
         <h1>📊 Результаты</h1>
-        <p class="subtitle">Всего бюллетеней: <strong>${total}</strong> · балл = место в процентах: 1-е = 100, последнее = 0; «Не знаю» не учитывается</p>
+        <p class="subtitle">Всего бюллетеней: <strong>${total}</strong> · балл = высота на поле: верх = 100, низ = 0 (старые бюллетени-списки: 1-е место = 100, последнее = 0); «Не знаю» не учитывается</p>
         <p class="subtitle">${
           ping.ok
             ? "☁ База онлайн, бюллетеней: " + (ping.count || 0)

@@ -25,19 +25,33 @@
     try { localStorage.removeItem(LOCAL_KEY); } catch (_) {}
   }
 
-  function compact(teamId, ranking) {
+  // Ballot encoding in the shared store (field "r"):
+  //   board ballots: "v2:" + "memberIndex=score" pairs, e.g. "v2:3=87,14=12" (score 0..100)
+  //   old list ballots: "memberIndex,memberIndex,..." best first (score = place percentile)
+  function compact(teamId, scored) {
     const members = ((window.POLL_CONFIG.TEAMS || {})[teamId] || {}).members || [];
-    return ranking
-      .map((name) => members.indexOf(name))
-      .filter((i) => i >= 0)
-      .join(",");
+    const parts = scored
+      .map((x) => [members.indexOf(x.name), Math.round(Math.max(0, Math.min(100, x.score)))])
+      .filter(([i]) => i >= 0)
+      .map(([i, sc]) => i + "=" + sc);
+    return parts.length ? "v2:" + parts.join(",") : "";
   }
 
   function expand(row) {
     const teamId = row.t || row.team_id;
     const members = ((window.POLL_CONFIG.TEAMS || {})[teamId] || {}).members || [];
     let ranking = row.ranking;
-    if (typeof row.r === "string" && row.r.length) {
+    let scores = null;
+    if (typeof row.r === "string" && row.r.startsWith("v2:")) {
+      scores = {};
+      for (const pair of row.r.slice(3).split(",")) {
+        const [i, sc] = pair.split("=");
+        const name = members[parseInt(i, 10)];
+        const v = Number(sc);
+        if (name && Number.isFinite(v)) scores[name] = Math.max(0, Math.min(100, v));
+      }
+      ranking = Object.keys(scores).sort((a, b) => scores[b] - scores[a]);
+    } else if (typeof row.r === "string" && row.r.length) {
       if (row._fmt === "names" || row.r.indexOf("||") !== -1) {
         ranking = row.r.split("||").filter(Boolean);
       } else {
@@ -48,6 +62,7 @@
       _id: row._id,
       team_id: teamId,
       ranking: ranking || [],
+      scores,
       device: row.d || row.device || "",
       name: row.n || row.name || "",
       ts: row.ts || 0,
@@ -90,7 +105,8 @@
     return votes.some((v) => v.device === device && v.team_id === teamId);
   }
 
-  async function addVote(teamId, ranking, voterName) {
+  // scored: [{name, score}] from the board.
+  async function addVote(teamId, scored, voterName) {
     const device = getDeviceId();
     const votes = await loadVotes();
     if (votes.some((v) => v.device === device && v.team_id === teamId)) {
@@ -98,8 +114,8 @@
       e.code = "ALREADY";
       throw e;
     }
-    const r = compact(teamId, ranking);
-    if (!r) throw new Error("Пустой рейтинг — расставьте всех участников");
+    const r = compact(teamId, scored);
+    if (!r) throw new Error("Пустой бюллетень: поставьте на поле хотя бы одного человека");
 
     const { res, data } = await api("/api/vote", {
       method: "POST",
@@ -107,7 +123,6 @@
       body: JSON.stringify({
         team_id: teamId,
         r: r,
-        ranking: ranking,
         device: device,
         name: voterName || "",
       }),
@@ -124,7 +139,8 @@
 
     localAdd({
       team_id: teamId,
-      ranking: ranking,
+      r: r,
+      ranking: scored.map((x) => x.name),
       device: device,
       name: voterName || "",
       ts: Date.now(),
@@ -141,9 +157,11 @@
     return ids;
   }
 
-  // Score of one ballot for a person = their place as a percentile of that ballot:
-  // 1st = 100, last = 0, a one-person ballot = 100. People a voter skipped ("don't know")
-  // simply aren't on that ballot, so a person's poll score averages only the ballots that ranked them.
+  // Score of one ballot for a person, 0..100:
+  //   board ballots carry the score directly (height on the board: top = 100, bottom = 0);
+  //   old list ballots use the place as a percentile: 1st = 100, last = 0, a one-person ballot = 100.
+  // People a voter left in "no idea" aren't on that ballot, so a person's poll score
+  // averages only the ballots that rated them.
   async function pollScores(teamId, allVotes) {
     const team = (window.POLL_CONFIG.TEAMS || {})[teamId];
     if (!team) return { ranked: [], vote_count: 0, name: "", member_count: 0 };
@@ -153,6 +171,16 @@
     let voteCount = 0;
     for (const vote of allVotes || (await loadVotes())) {
       if (vote.team_id !== teamId) continue;
+      if (vote.scores) {
+        const names = Object.keys(vote.scores).filter((name) => name in sum);
+        if (!names.length) continue;
+        voteCount++;
+        names.forEach((name) => {
+          sum[name] += vote.scores[name];
+          cnt[name] += 1;
+        });
+        continue;
+      }
       const ranking = (vote.ranking || []).filter((name) => name in sum);
       if (!ranking.length) continue;
       voteCount++;
