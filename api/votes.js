@@ -24,6 +24,7 @@ module.exports = async function handler(req, res) {
         ts: row.ts || 0,
       })),
       count: all.length,
+      reset_at: (data.meta && data.meta.reset_at) || 0,
       admin,
     });
   } catch (e) {
