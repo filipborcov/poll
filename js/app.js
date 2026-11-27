@@ -5,13 +5,18 @@
 
   // Avatar: photo from cfg.AVATARS if set, otherwise initials on a brand colour picked from the name.
   const AVATAR_COLORS = ["#EB1E2A", "#F26518", "#2196F3", "#489335", "#5833A4", "#D24B69", "#F68C14", "#7A4CD6", "#85001D", "#61B9FF"];
-  function avatar(name) {
-    const src = (cfg.AVATARS || {})[name];
-    if (src) return `<img class="avatar" src="${src}" alt="" draggable="false">`;
+  function initialsAvatar(name) {
     const initials = name.replace(/[^\p{L}\s]/gu, " ").trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase();
     let h = 0;
     for (const ch of name) h = (h * 31 + ch.codePointAt(0)) >>> 0;
     return `<span class="avatar" style="background:${AVATAR_COLORS[h % AVATAR_COLORS.length]}">${initials}</span>`;
+  }
+  function avatar(name) {
+    const src = (cfg.AVATARS || {})[name];
+    const fallback = initialsAvatar(name);
+    if (!src) return fallback;
+    // If the photo can't load, swap in the initials circle.
+    return `<img class="avatar" src="${src}" alt="" draggable="false" loading="lazy" referrerpolicy="no-referrer" data-fallback="${encodeURIComponent(fallback)}" onerror="this.outerHTML=decodeURIComponent(this.dataset.fallback)">`;
   }
   let currentBoard = null; // { teamId, api } while the voting board is shown
 
