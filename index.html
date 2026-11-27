@@ -853,14 +853,35 @@ button, input, select, textarea { font-family: inherit; }
     return { res, data };
   }
 
-  async function loadVotes() {
-    try {
-      const url = "/api/votes?device=" + encodeURIComponent(getDeviceId()) + "&_=" + Date.now();
-      const { res, data } = await api(url, { cache: "no-store" });
-      if (res.ok && data && Array.isArray(data.votes)) {
-        return data.votes.map(expand);
+  // One shared /api/votes request per moment: the home page needs both the
+  // status pill and "your votes", which used to be two separate database reads.
+  let votesReq = null; // { at, promise }
+  function fetchVotes(force) {
+    if (!force && votesReq && Date.now() - votesReq.at < 2000) return votesReq.promise;
+    const url = "/api/votes?device=" + encodeURIComponent(getDeviceId()) + "&_=" + Date.now();
+    const promise = (async () => {
+      let last;
+      for (let i = 0; i < 2; i++) {
+        try {
+          const { res, data } = await api(url, { cache: "no-store" });
+          if (res.ok && data && Array.isArray(data.votes)) return data;
+          last = new Error((data && data.error) || "api " + res.status);
+        } catch (e) {
+          last = e;
+        }
+        await new Promise((r) => setTimeout(r, 800));
       }
-      throw new Error((data && data.error) || "api " + (res && res.status));
+      throw last;
+    })();
+    votesReq = { at: Date.now(), promise };
+    promise.catch(() => { if (votesReq && votesReq.promise === promise) votesReq = null; });
+    return promise;
+  }
+
+  async function loadVotes(force) {
+    try {
+      const data = await fetchVotes(force);
+      return data.votes.map(expand);
     } catch (e) {
       console.warn("api load failed", e);
       return localGet();
@@ -911,8 +932,9 @@ button, input, select, textarea { font-family: inherit; }
       throw e;
     }
     if (!res.ok) {
-      throw new Error((data && data.error) || I18N.t("errSave", { s: res.status }));
+      throw new Error((data && data.message) || (data && data.error) || I18N.t("errSave", { s: res.status }));
     }
+    votesReq = null; // next read must include this vote
 
     localAdd({
       team_id: teamId,
@@ -928,7 +950,12 @@ button, input, select, textarea { font-family: inherit; }
   async function votedIds() {
     const device = getDeviceId();
     const ids = {};
-    for (const v of await loadVotes()) {
+    // Local copies too (only those newer than the last reset): a read served a moment
+    // before our own write might not show it yet.
+    const server = await loadVotes();
+    let resetAt = 0;
+    try { resetAt = (await fetchVotes()).reset_at || 0; } catch (_) {}
+    for (const v of server.concat(localGet().filter((x) => (x.ts || 0) > resetAt))) {
       if (v.device === device) ids[v.team_id] = true;
     }
     return ids;
@@ -1006,9 +1033,8 @@ button, input, select, textarea { font-family: inherit; }
 
   async function ping() {
     try {
-      const { res, data } = await api("/api/votes?_=" + Date.now(), { cache: "no-store" });
-      if (!res.ok) return { ok: false, mode: "down", error: (data && data.error) || String(res.status) };
-      return { ok: true, mode: "api", count: (data && data.count) || (data.votes || []).length };
+      const data = await fetchVotes();
+      return { ok: true, mode: "api", count: data.count || 0 };
     } catch (e) {
       return { ok: false, mode: "down", error: String(e.message || e) };
     }

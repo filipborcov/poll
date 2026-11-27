@@ -17,26 +17,28 @@ module.exports = async function handler(req, res) {
       return res.status(400).json({ error: "need team_id and ranking" });
     }
 
-    // retry on rare conflicts
-    for (let i = 0; i < 4; i++) {
-      const data = await readStore();
-      data.votes = Array.isArray(data.votes) ? data.votes : [];
+    // rentry has no atomic update: two votes saved at the same moment can overwrite
+    // each other. So after writing we read back and re-add our vote if it was lost.
+    const key = device + ":" + team_id;
+    const mine = (v) => (v.d || v.device) === device && (v.t || v.team_id) === team_id;
+    const ts = Date.now();
+    for (let i = 0; i <= 3; i++) {
+      const data = await readStore({ fresh: true });
       data.devices = data.devices && typeof data.devices === "object" ? data.devices : {};
-      const key = device + ":" + team_id;
-      if (data.devices[key] || data.votes.some((v) => (v.d || v.device) === device && (v.t || v.team_id) === team_id)) {
-        return res.status(409).json({ error: "already", message: "Already voted from this device" });
+      const existing = data.votes.find(mine);
+      if (existing) {
+        if (i === 0) return res.status(409).json({ error: "already", message: "Already voted from this device" });
+        return res.status(200).json({ ok: true, total: data.votes.length }); // our earlier write survived
       }
-      data.votes.push({ t: team_id, r: r, d: device, n: name, ts: Date.now() });
-      data.devices[key] = { ts: Date.now(), name };
+      if (i === 3) break; // three writes didn't stick
+      data.votes.push({ t: team_id, r: r, d: device, n: name, ts });
+      data.devices[key] = { ts, name };
       data.meta = Object.assign({}, data.meta || {}, { updated: Date.now() });
-      try {
-        await writeStore(data);
-        return res.status(200).json({ ok: true, total: data.votes.length });
-      } catch (e) {
-        if (i === 3) throw e;
-        await new Promise((r) => setTimeout(r, 120 * (i + 1)));
-      }
+      await writeStore(data);
+      // Give a concurrent writer time to land, then check on the next loop pass.
+      await new Promise((ok) => setTimeout(ok, 700 + Math.random() * 600));
     }
+    return res.status(503).json({ error: "busy", message: "Database is busy, please try again" });
   } catch (e) {
     return res.status(502).json({ error: String(e.message || e) });
   }
