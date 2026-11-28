@@ -215,7 +215,7 @@
   const pluralVotes = (n) => I18N.votes(n);
 
   async function renderAdmin(key) {
-    if (key !== cfg.ADMIN_SECRET || !(await PollStore.isAdmin())) {
+    if (!(await PollStore.isAdmin(key))) {
       root.innerHTML = `
         <div class="hero">
           <h1>403</h1>

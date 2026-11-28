@@ -1,29 +1,35 @@
-# Простое голосование (Borda)
+# Choose the BEST — голосование
 
-Сайт: **https://poll69.vercel.app/**
+Статическая страница (`index.html`) + маленький PHP-бэкенд (`api/*.php`) + база **SQLite**.
+Нужен обычный виртуальный хостинг с PHP 7.4+ и расширением `pdo_sqlite` (есть почти везде).
 
-Админ: **https://poll69.vercel.app/#/admin?key=rank2026admin**
+## Как устроено
 
-## Как устроена база
+- `GET  api/votes.php?device=…` — голоса этого устройства (админ с ключом видит все)
+- `POST api/vote.php` — записать голос. Один голос на устройство в каждом опросе
+  (это гарантирует сама база: `UNIQUE(device, team)`), одновременные голоса не теряются.
+- `GET  api/admin.php` — проверка ключа админа
+- `POST api/reset.php` — новый раунд (только админ). Голоса не удаляются, а переносятся
+  в таблицу `votes_archive`, так что случайный сброс можно откатить. Каждая попытка сброса
+  пишется в `admin_log` (время, IP, успех).
 
-Один JSON-файл: `data/votes.json` в этом репозитории.
+## Установка на хостинг
 
-- `GET /api/votes` — прочитать голоса  
-- `POST /api/vote` — записать голос  
-- `POST /api/reset` — скинуть (админ)
+1. Залей в папку сайта (например `public_html/poll/`) файлы: `index.html`, `.htaccess`,
+   `api/`, `data/`, `css/`, `js/`, `avatars/`. Папки `tools/` и файлы `*.md`, `build.py` не нужны.
+2. Скопируй `api/config.sample.php` в `api/config.php` и впиши длинный случайный `admin_key`
+   (по желанию — `admin_ips`). Этот файл не коммитится.
+3. База. По умолчанию файл лежит в `poll-data/poll.sqlite` **рядом** с папкой сайта
+   (на уровень выше, вне веб-доступа). Папка создаётся сама. Если хостинг не даёт писать
+   выше папки сайта, база создаётся в `data/` с непредсказуемым именем, а `data/.htaccess`
+   закрывает её от скачивания. Можно указать путь явно в `db_path`.
+4. Перенос старых голосов: положи готовый `poll.sqlite` в `poll-data/` или запусти
+   `php tools/import-votes.php export.txt` по SSH.
+5. Проверь: `https://сайт/poll/api/votes.php` отдаёт JSON, а
+   `https://сайт/poll/data/` и `https://сайт/poll/api/config.php` — ошибку 403/404.
 
-## Один шаг, чтобы запись заработала
+Админка: `https://сайт/poll/#/admin?key=ТВОЙ_КЛЮЧ` (ключ хранится только на сервере).
 
-Сейчас чтение уже есть, **запись** нужна 1 переменная на Vercel:
+## Сборка страницы
 
-1. Создай GitHub token: https://github.com/settings/tokens  
-   Classic → scope **`repo`** → Generate
-2. Vercel → проект **poll69** → **Settings → Environment Variables**  
-   - Name: `POLL_GITHUB_TOKEN`  
-   - Value: *токен*  
-   - Production ✅
-3. **Deployments** → ⋮ на последнем → **Redeploy**  
-   (если деплой был Canceled — сделай Redeploy)
-
-Проверка: открой https://poll69.vercel.app/api/votes  
-Должен быть JSON `{"votes":[],...}`, не ошибка про token.
+`index.html` собирается из `css/` и `js/`: `python3 build.py`.

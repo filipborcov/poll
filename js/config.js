@@ -25,7 +25,6 @@
   }
 
   window.POLL_CONFIG = {
-    ADMIN_SECRET: "rank2026admin",
     // Photos: ClickUp profile pictures (or files in avatars/). If a photo fails to load,
     // or a person has none, a coloured circle with their initials is shown instead.
     AVATARS: {
