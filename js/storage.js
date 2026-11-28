@@ -86,7 +86,7 @@
       let last;
       for (let i = 0; i < 2; i++) {
         try {
-          const { res, data } = await api(url, { cache: "no-store" });
+          const { res, data } = await api(url, { cache: "no-store", headers: adminHeaders() });
           if (res.ok && data && Array.isArray(data.votes)) return data;
           last = new Error((data && data.error) || "api " + res.status);
         } catch (e) {
@@ -224,23 +224,36 @@
     return { ranked, vote_count: voteCount, name: team.name, member_count: members.length };
   }
 
-  async function isAdmin() {
+  // Admin key comes from the admin page URL (#/admin?key=...), never from this file.
+  // The server checks it (and the admin IP list, if set) on every admin request.
+  let adminKey = "";
+  function adminHeaders() {
+    return adminKey ? { "X-Admin-Key": adminKey } : {};
+  }
+
+  async function isAdmin(key) {
+    adminKey = key || "";
+    if (!adminKey) return false;
     try {
-      const { res, data } = await api("/api/admin?_=" + Date.now(), { cache: "no-store" });
-      return !!(res.ok && data && data.ok);
+      const { res, data } = await api("/api/admin?_=" + Date.now(), { cache: "no-store", headers: adminHeaders() });
+      const ok = !!(res.ok && data && data.ok);
+      if (!ok) adminKey = "";
+      votesReq = null; // admin sees all ballots: drop a cached device-only read
+      return ok;
     } catch (_) {
+      adminKey = "";
       return false;
     }
   }
 
   async function resetAll() {
-    const key = window.POLL_CONFIG.ADMIN_SECRET;
     const { res, data } = await api("/api/reset", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "X-Admin-Key": key },
-      body: JSON.stringify({ key }),
+      headers: Object.assign({ "Content-Type": "application/json" }, adminHeaders()),
+      body: "{}",
     });
     if (!res.ok) throw new Error((data && data.error) || I18N.t("resetFailed"));
+    votesReq = null;
     localClear();
   }
 

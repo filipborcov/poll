@@ -1,33 +1,37 @@
-const { cors, readStore } = require("./_db");
-const { isAdminIp } = require("./_admin");
+// GET /api/votes?device=...  -> this device's votes; admin (X-Admin-Key) gets all votes.
+const { db, getMeta, cors, fail } = require("./_db");
+const { isAdmin } = require("./_admin");
 
 module.exports = async function handler(req, res) {
   cors(res);
   if (req.method === "OPTIONS") return res.status(204).end();
   if (req.method !== "GET") return res.status(405).json({ error: "GET only" });
   try {
-    const data = await readStore();
-    const all = Array.isArray(data.votes) ? data.votes : [];
-    // Full ballots only for the admin IP; everyone else sees just their own device's votes.
-    const admin = isAdminIp(req);
-    const device = String((req.query && req.query.device) || "");
-    const votes = admin ? all : all.filter((row) => device && (row.d || row.device) === device);
+    const c = await db();
+    const admin = isAdmin(req);
+    const device = String((req.query && req.query.device) || "").slice(0, 80);
+    let rows = [];
+    if (admin) {
+      rows = (await c.execute("SELECT id, team, device, name, r, ts FROM votes ORDER BY id")).rows;
+    } else if (device) {
+      rows = (await c.execute({ sql: "SELECT id, team, device, name, r, ts FROM votes WHERE device = ? ORDER BY id", args: [device] })).rows;
+    }
+    const count = Number((await c.execute("SELECT COUNT(*) AS n FROM votes")).rows[0].n);
     res.setHeader("Cache-Control", "no-store");
     return res.status(200).json({
-      votes: votes.map((row) => ({
-        _id: row._id || row.ts || undefined,
-        team_id: row.t || row.team_id,
-        r: row.r,
-        ranking: row.ranking,
-        device: row.d || row.device || "",
-        name: row.n || row.name || "",
-        ts: row.ts || 0,
+      votes: rows.map((v) => ({
+        _id: Number(v.id),
+        team_id: v.team,
+        r: v.r,
+        device: v.device,
+        name: v.name,
+        ts: Number(v.ts),
       })),
-      count: all.length,
-      reset_at: (data.meta && data.meta.reset_at) || 0,
+      count,
+      reset_at: Number(await getMeta(c, "reset_at", 0)),
       admin,
     });
   } catch (e) {
-    return res.status(502).json({ error: String(e.message || e) });
+    return fail(res, e);
   }
 };
