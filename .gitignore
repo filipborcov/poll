@@ -2,6 +2,4 @@
 .vercel
 node_modules/
 *.log
-api/config.php
-data/*.sqlite*
-poll-data/
+*.db

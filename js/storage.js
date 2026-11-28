@@ -81,7 +81,7 @@
   let votesReq = null; // { at, promise }
   function fetchVotes(force) {
     if (!force && votesReq && Date.now() - votesReq.at < 2000) return votesReq.promise;
-    const url = "api/votes.php?device=" + encodeURIComponent(getDeviceId()) + "&_=" + Date.now();
+    const url = "/api/votes?device=" + encodeURIComponent(getDeviceId()) + "&_=" + Date.now();
     const promise = (async () => {
       let last;
       for (let i = 0; i < 2; i++) {
@@ -138,7 +138,7 @@
     const r = compact(teamId, scored);
     if (!r) throw new Error(I18N.t("errEmpty"));
 
-    const { res, data } = await api("api/vote.php", {
+    const { res, data } = await api("/api/vote", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -235,7 +235,7 @@
     adminKey = key || "";
     if (!adminKey) return false;
     try {
-      const { res, data } = await api("api/admin.php?_=" + Date.now(), { cache: "no-store", headers: adminHeaders() });
+      const { res, data } = await api("/api/admin?_=" + Date.now(), { cache: "no-store", headers: adminHeaders() });
       const ok = !!(res.ok && data && data.ok);
       if (!ok) adminKey = "";
       votesReq = null; // admin sees all ballots: drop a cached device-only read
@@ -247,7 +247,7 @@
   }
 
   async function resetAll() {
-    const { res, data } = await api("api/reset.php", {
+    const { res, data } = await api("/api/reset", {
       method: "POST",
       headers: Object.assign({ "Content-Type": "application/json" }, adminHeaders()),
       body: "{}",
